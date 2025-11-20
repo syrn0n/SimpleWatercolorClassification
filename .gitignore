@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environment
+.venv/
+venv/
+env/
+
+# IDEs
+.vscode/
+.idea/
+
+# Project output
+*.csv
+watercolor_results_*.csv
+debug_results.csv
+
+# DS_Store
+.DS_Store
+
+# Distribution / Packaging
+dist/
+build/
+*.egg-info/
