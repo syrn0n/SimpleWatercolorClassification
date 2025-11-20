@@ -13,7 +13,7 @@ class BatchProcessor:
         self.video_exts = {'.mp4', '.avi', '.mov', '.mkv'}
 
     def process_folder(self, folder_path: str, output_csv: str, min_frames: int = 3,
-                      detection_threshold: float = 0.5, strict_mode: bool = False,
+                      detection_threshold: float = 0.3, strict_mode: bool = False,
                       image_threshold: float = 0.85):
         """
         Recursively process a folder and write results to a CSV file.

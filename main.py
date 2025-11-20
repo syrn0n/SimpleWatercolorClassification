@@ -12,7 +12,7 @@ def main():
     parser.add_argument("--threshold", type=float, default=0.85, help="Confidence threshold for classification")
     parser.add_argument("--output", help="Path to output CSV file (optional, defaults to timestamped file)")
     parser.add_argument("--min-frames", type=int, default=3, help="Minimum number of frames to sample per video (default: 3)")
-    parser.add_argument("--detection-threshold", type=float, default=0.5, help="Percentage of frames (0.0-1.0) required to classify video as watercolor (default: 0.5)")
+    parser.add_argument("--detection-threshold", type=float, default=0.3, help="Percentage of frames (0.0-1.0) required to classify video as watercolor (default: 0.3)")
     parser.add_argument("--strict-mode", action="store_true", help="Enable strict multi-condition classification to minimize false positives")
 
     args = parser.parse_args()
