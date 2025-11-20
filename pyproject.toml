@@ -11,7 +11,8 @@ dependencies = [
     "opencv-python",
     "ftfy",
     "regex",
-    "tqdm"
+    "tqdm",
+    "requests>=2.32.5",
 ]
 
 [dependency-groups]

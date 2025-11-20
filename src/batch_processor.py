@@ -4,6 +4,7 @@ from typing import List, Dict
 from tqdm import tqdm
 from .classifier import WatercolorClassifier
 from .video_processor import VideoProcessor
+from .immich_client import ImmichClient
 
 class BatchProcessor:
     def __init__(self, classifier: WatercolorClassifier, video_processor: VideoProcessor):
@@ -14,10 +15,23 @@ class BatchProcessor:
 
     def process_folder(self, folder_path: str, output_csv: str, min_frames: int = 3,
                       detection_threshold: float = 0.3, strict_mode: bool = False,
-                      image_threshold: float = 0.85):
+                      image_threshold: float = 0.85,
+                      immich_url: str = None, immich_api_key: str = None, immich_tag: str = "Watercolor",
+                      immich_path_mappings: Dict[str, str] = None):
         """
         Recursively process a folder and write results to a CSV file.
         """
+        immich_client = None
+        tag_id = None
+        if immich_url and immich_api_key:
+            print(f"Initializing Immich client for {immich_url}...")
+            immich_client = ImmichClient(immich_url, immich_api_key, immich_path_mappings)
+            tag_id = immich_client.create_tag_if_not_exists(immich_tag)
+            if tag_id:
+                print(f"Using Immich tag '{immich_tag}' (ID: {tag_id})")
+            else:
+                print(f"Warning: Could not create or find tag '{immich_tag}'. Tagging will be skipped.")
+                immich_client = None
         files_to_process = []
         for root, _, files in os.walk(folder_path):
             for file in files:
@@ -83,6 +97,17 @@ class BatchProcessor:
                         "watercolor_frames_percent": 1.0 if is_wc else 0.0,
                         "avg_watercolor_confidence": wc_prob if is_wc else 0.0
                     })
+
+                # Tag in Immich if enabled
+                if immich_client and tag_id and results and results[-1]['is_watercolor']:
+                    asset_id = immich_client.get_asset_id_from_path(file_path)
+                    if asset_id:
+                        success = immich_client.add_tag_to_asset(asset_id, tag_id)
+                        if success:
+                            print(f"Tagged {os.path.basename(file_path)} in Immich.")
+                        else:
+                            print(f"Failed to tag {os.path.basename(file_path)} in Immich.")
+
             except Exception as e:
                 print(f"Error processing {file_path}: {e}")
                 results.append({

@@ -24,3 +24,6 @@ debug_results.csv
 dist/
 build/
 *.egg-info/
+**/__pycache__/*
+src/__pycache__/*
+

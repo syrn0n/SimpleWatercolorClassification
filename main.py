@@ -14,6 +14,10 @@ def main():
     parser.add_argument("--min-frames", type=int, default=3, help="Minimum number of frames to sample per video (default: 3)")
     parser.add_argument("--detection-threshold", type=float, default=0.3, help="Percentage of frames (0.0-1.0) required to classify video as watercolor (default: 0.3)")
     parser.add_argument("--strict-mode", action="store_true", help="Enable strict multi-condition classification to minimize false positives")
+    parser.add_argument("--immich-url", help="Immich Server URL (e.g., http://192.168.1.100:2283)")
+    parser.add_argument("--immich-key", help="Immich API Key")
+    parser.add_argument("--immich-tag", default="Watercolor", help="Tag name to apply in Immich (default: Watercolor)")
+    parser.add_argument("--immich-path-mapping", help="Path mappings in format 'local:remote;local2:remote2' (e.g., '/mnt/photos:/usr/src/app/photos')")
 
     args = parser.parse_args()
 
@@ -32,13 +36,29 @@ def main():
             output_csv = f"watercolor_results_{timestamp}.csv"
             print(f"No output file specified. Using default: {output_csv}")
 
+        # Parse path mappings
+        path_mappings = {}
+        if args.immich_path_mapping:
+            try:
+                for mapping in args.immich_path_mapping.split(';'):
+                    if ':' in mapping:
+                        local, remote = mapping.split(':', 1)
+                        path_mappings[local.strip()] = remote.strip()
+            except Exception as e:
+                print(f"Error parsing path mappings: {e}")
+                sys.exit(1)
+
         print(f"Processing folder: {args.path}")
         batch_processor = BatchProcessor(classifier, video_processor)
         batch_processor.process_folder(
             args.path, output_csv, min_frames=args.min_frames,
             detection_threshold=args.detection_threshold,
             strict_mode=args.strict_mode,
-            image_threshold=args.threshold
+            image_threshold=args.threshold,
+            immich_url=args.immich_url,
+            immich_api_key=args.immich_key,
+            immich_tag=args.immich_tag,
+            immich_path_mappings=path_mappings
         )
 
     else:
