@@ -1,7 +1,5 @@
 import requests
 import os
-import requests
-import os
 from typing import Optional, Dict
 
 class ImmichClient:
@@ -18,78 +16,57 @@ class ImmichClient:
     def get_asset_id_from_path(self, file_path: str) -> Optional[str]:
         """
         Try to find an asset in Immich by its original file path.
-
-        Note: Immich doesn't have a direct "get by path" endpoint that is efficiently indexed for all versions.
-        We will try to use the search API or metadata search if available.
-
-        As a fallback/primary strategy for many setups, we can search by filename and filter by path.
         """
-        filename = os.path.basename(file_path)
-
-        # Strategy: Search by filename
-        # Endpoint: /api/search/metadata (if available) or /api/asset/search (older) or /api/search/smart
-        # Let's try the standard asset search/filtering if possible.
-        # Actually, /api/asset/ has a check mechanism?
-
-        # Let's try to search by originalFileName
+        # Translate path
+        translated_path = file_path
+        for local_prefix, remote_prefix in self.path_mappings.items():
+            if file_path.startswith(local_prefix):
+                # Replace prefix
+                remote_suffix = file_path[len(local_prefix):]
+                translated_path = remote_prefix + remote_suffix
+                # Normalize slashes for remote (assuming Linux/Docker target)
+                translated_path = translated_path.replace('\\', '/')
+                break
+        
         try:
-            # Using the search endpoint which is quite general
-            # Note: The API might change between versions.
-            # We'll try a POST to /api/search/metadata if it exists, or just GET /api/asset with originalFileName?
-            # GET /api/asset doesn't filter by name easily in all versions.
-
-            # Let's try the 'search' endpoint.
+            # Use the metadata search endpoint with originalPath
             search_url = f"{self.url}/api/search/metadata"
             payload = {
-                "originalFileName": filename
+                "originalPath": translated_path
             }
-            # Note: This endpoint might not exist in all versions.
-            # Alternative: POST /api/asset/check (checks if assets exist, returns IDs?) - usually for upload.
 
-            # Let's try a simpler approach: Search by text (filename)
-            # GET /api/search?q=filename
-            response = requests.get(
-                f"{self.url}/api/search",
-                params={"q": filename, "clip": "false"},
+            response = requests.post(
+                search_url,
+                json=payload,
                 headers=self.headers
             )
 
             if response.status_code == 200:
                 results = response.json()
-                # results['assets']['items'] usually
                 assets = results.get('assets', {}).get('items', [])
 
-                for asset in assets:
-                    # Check if the path matches
-                    # The asset object usually has 'originalPath'
-                    original_path = asset.get('originalPath')
-
-                    # Apply path mappings to local file_path for comparison
-                    mapped_path = file_path
-                    for local_prefix, immich_prefix in self.path_mappings.items():
-                        if file_path.startswith(local_prefix):
-                            mapped_path = file_path.replace(local_prefix, immich_prefix, 1)
-                            break
-
-                    if original_path and original_path == mapped_path:
-                        return asset['id']
-
-                    # If paths are slightly different (e.g. mount points), we might need loose matching.
-                    # For now, strict match or filename match if unique?
-                    # Let's stick to strict match if possible, or at least filename match if the user accepts it.
-                    # But the user asked for "maps physical path".
-
-                    # If originalPath is not exposed, we might be stuck.
-                    # But usually it is for the admin/owner.
-                    pass
-
-                # Fallback: if we found assets with the exact filename and there's only one, maybe return it?
-                # Risk of false positive.
-                # Let's try to be safe. If we can't verify the path, we shouldn't tag.
+                if assets:
+                    # Return the first match. 
+                    # Since we searched by exact path, it should be the correct one.
+                    return assets[0]['id']
 
         except Exception as e:
-            print(f"Error searching for asset {filename}: {e}")
+            print(f"Error searching for asset {file_path}: {e}")
 
+        return None
+
+    def reverse_path_mapping(self, immich_path: str) -> Optional[str]:
+        """
+        Convert Immich server path to local file path.
+        """
+        for local_prefix, server_prefix in self.path_mappings.items():
+            if immich_path.startswith(server_prefix):
+                # Remove server prefix
+                relative_path = immich_path[len(server_prefix):]
+                # Add local prefix
+                local_path = local_prefix + relative_path
+                # Normalize path separators for local OS
+                return os.path.normpath(local_path)
         return None
 
     def create_tag_if_not_exists(self, tag_name: str) -> Optional[str]:
@@ -98,7 +75,7 @@ class ImmichClient:
         """
         try:
             # First, list tags to see if it exists
-            response = requests.get(f"{self.url}/api/tag", headers=self.headers)
+            response = requests.get(f"{self.url}/api/tags", headers=self.headers)
             if response.status_code == 200:
                 tags = response.json()
                 for tag in tags:
@@ -107,8 +84,8 @@ class ImmichClient:
 
             # Create it
             response = requests.post(
-                f"{self.url}/api/tag",
-                json={"name": tag_name, "type": "CUSTOM"}, # 'type' might not be needed or might be different
+                f"{self.url}/api/tags",
+                json={"name": tag_name},
                 headers=self.headers
             )
             if response.status_code in (200, 201):
@@ -126,13 +103,51 @@ class ImmichClient:
         Add a tag to an asset.
         """
         try:
-            # PUT /api/tag/{id}/assets
+            # PUT /api/tags/{id}/assets
             response = requests.put(
-                f"{self.url}/api/tag/{tag_id}/assets",
+                f"{self.url}/api/tags/{tag_id}/assets",
                 json={"ids": [asset_id]},
                 headers=self.headers
             )
             return response.status_code in (200, 201)
         except Exception as e:
             print(f"Error adding tag to asset {asset_id}: {e}")
+            return False
+
+    def get_assets_by_tag(self, tag_id: str) -> list:
+        """
+        Get all assets with the specified tag.
+        Uses search/metadata endpoint since there's no direct tag assets endpoint.
+        """
+        try:
+            # Use search/metadata endpoint with tag filter
+            response = requests.post(
+                f"{self.url}/api/search/metadata",
+                json={"tagIds": [tag_id]},
+                headers=self.headers
+            )
+            if response.status_code == 200:
+                results = response.json()
+                assets = results.get('assets', {}).get('items', [])
+                return assets
+            else:
+                print(f"Failed to get assets for tag {tag_id}: {response.text}")
+                return []
+        except Exception as e:
+            print(f"Error getting assets for tag {tag_id}: {e}")
+            return []
+
+    def delete_asset(self, asset_id: str) -> bool:
+        """
+        Delete an asset from Immich.
+        """
+        try:
+            response = requests.delete(
+                f"{self.url}/api/assets",
+                json={"ids": [asset_id]},
+                headers=self.headers
+            )
+            return response.status_code in (200, 204)
+        except Exception as e:
+            print(f"Error deleting asset {asset_id}: {e}")
             return False

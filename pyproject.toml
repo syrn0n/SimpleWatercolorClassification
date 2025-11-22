@@ -13,12 +13,15 @@ dependencies = [
     "regex",
     "tqdm",
     "requests>=2.32.5",
+    "python-dotenv",
 ]
 
 [dependency-groups]
 dev = [
     "flake8",
     "pytest",
+    "pytest-cov",
+    "pytest-mock",
 ]
 
 [build-system]

@@ -3,32 +3,23 @@
     "configurations": [
         {
             "name": "Python: Current File",
-            "type": "debugpy",
+            "type": "python",
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
+            "python": "${workspaceFolder}/.venv/Scripts/python.exe",
             "justMyCode": true
         },
         {
-            "name": "Debug: Classify Image",
-            "type": "debugpy",
+            "name": "Python: Main",
+            "type": "python",
             "request": "launch",
             "program": "${workspaceFolder}/main.py",
-            "args": [
-                "${workspaceFolder}/tests/test_image.jpg"
-            ],
             "console": "integratedTerminal",
-            "justMyCode": true
-        },
-        {
-            "name": "Debug: Batch Process Folder",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${workspaceFolder}/main.py",
+            "python": "${workspaceFolder}/.venv/Scripts/python.exe",
             "args": [
-                "/Users/yossi.srebnogur/Documents/GitHub/ImageClassification/data/videos/"
+                "E:\\library\\library\\admin"
             ],
-            "console": "integratedTerminal",
             "justMyCode": true
         }
     ]
