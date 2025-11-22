@@ -4,8 +4,7 @@ Tests for AssetMover class
 import pytest
 import os
 import tempfile
-import shutil
-from unittest.mock import Mock, patch, MagicMock, call
+from unittest.mock import Mock
 from src.asset_mover import AssetMover
 from src.immich_client import ImmichClient
 

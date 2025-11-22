@@ -14,8 +14,7 @@ env/
 
 # Project output
 *.csv
-watercolor_results_*.csv
-debug_results.csv
+*.json
 
 # DS_Store
 .DS_Store

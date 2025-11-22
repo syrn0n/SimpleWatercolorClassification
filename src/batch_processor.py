@@ -6,6 +6,7 @@ from .classifier import WatercolorClassifier
 from .video_processor import VideoProcessor
 from .immich_client import ImmichClient
 
+
 class BatchProcessor:
     def __init__(self, classifier: WatercolorClassifier, video_processor: VideoProcessor):
         self.classifier = classifier
@@ -14,10 +15,10 @@ class BatchProcessor:
         self.video_exts = {'.mp4', '.avi', '.mov', '.mkv'}
 
     def process_folder(self, folder_path: str, output_csv: str, min_frames: int = 3,
-                      detection_threshold: float = 0.3, strict_mode: bool = False,
-                      image_threshold: float = 0.85,
-                      immich_url: str = None, immich_api_key: str = None, immich_tag: str = "Watercolor",
-                      immich_path_mappings: Dict[str, str] = None):
+                       detection_threshold: float = 0.3, strict_mode: bool = False,
+                       image_threshold: float = 0.85,
+                       immich_url: str = None, immich_api_key: str = None, immich_tag: str = "Watercolor",
+                       immich_path_mappings: Dict[str, str] = None):
         """
         Recursively process a folder and write results to a CSV file.
         """

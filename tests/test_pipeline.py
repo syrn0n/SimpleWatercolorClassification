@@ -7,12 +7,13 @@ from src.classifier import WatercolorClassifier
 # Add project root to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+
 class TestWatercolorClassifier(unittest.TestCase):
     def setUp(self):
         self.classifier = WatercolorClassifier()
         # Create a dummy image
         self.test_image_path = "test_image.jpg"
-        img = Image.new('RGB', (224, 224), color = 'red')
+        img = Image.new('RGB', (224, 224), color='red')
         img.save(self.test_image_path)
 
     def tearDown(self):
@@ -35,6 +36,7 @@ class TestWatercolorClassifier(unittest.TestCase):
         """Test the boolean logic (even if result is not meaningful for a red square)."""
         is_wc = self.classifier.is_watercolor(self.test_image_path)
         self.assertIsInstance(is_wc, bool)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 from src.immich_client import ImmichClient
 
+
 class TestImmichClientPathMapping(unittest.TestCase):
     def setUp(self):
         self.mappings = {
@@ -82,6 +83,7 @@ class TestImmichClientPathMapping(unittest.TestCase):
 
         asset_id = self.client.get_asset_id_from_path(local_path)
         self.assertIsNone(asset_id)
+
 
 if __name__ == '__main__':
     unittest.main()

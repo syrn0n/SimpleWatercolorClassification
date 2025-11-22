@@ -9,25 +9,48 @@ from src.batch_processor import BatchProcessor
 from src.asset_mover import AssetMover
 from src.immich_client import ImmichClient
 
+
 def main():
     load_dotenv()
     vals = dotenv_values()
+
+    # Generate timestamp for default report names
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    default_csv = f"move_report_{timestamp}.csv"
+    default_log = f"move_log_{timestamp}.json"
+
     parser = argparse.ArgumentParser(description="Classify images or videos as watercolor paintings.")
     parser.add_argument("path", help="Path to the image, video, or folder")
-    parser.add_argument("--threshold", type=float, default=float(os.getenv("WATERCOLOR_THRESHOLD", 0.85)), help="Confidence threshold for classification")
-    parser.add_argument("--output", default=os.getenv("WATERCOLOR_OUTPUT"), help="Path to output CSV file (optional, defaults to timestamped file)")
-    parser.add_argument("--min-frames", type=int, default=int(os.getenv("WATERCOLOR_MIN_FRAMES", 3)), help="Minimum number of frames to sample per video (default: 3)")
-    parser.add_argument("--detection-threshold", type=float, default=float(os.getenv("WATERCOLOR_DETECTION_THRESHOLD", 0.3)), help="Percentage of frames (0.0-1.0) required to classify video as watercolor (default: 0.3)")
-    parser.add_argument("--strict-mode", action="store_true", default=os.getenv("WATERCOLOR_STRICT_MODE", "false").lower() == "true", help="Enable strict multi-condition classification to minimize false positives")
-    parser.add_argument("--immich-url", default=os.getenv("IMMICH_URL"), help="Immich Server URL (e.g., http://192.168.1.100:2283)")
+    parser.add_argument("--threshold", type=float, default=float(os.getenv("WATERCOLOR_THRESHOLD", 0.85)),
+                        help="Confidence threshold for classification")
+    parser.add_argument("--output", default=os.getenv("WATERCOLOR_OUTPUT"),
+                        help="Path to output CSV file (optional, defaults to timestamped file)")
+    parser.add_argument("--min-frames", type=int, default=int(os.getenv("WATERCOLOR_MIN_FRAMES", 3)),
+                        help="Minimum number of frames to sample per video (default: 3)")
+    parser.add_argument("--detection-threshold", type=float,
+                        default=float(os.getenv("WATERCOLOR_DETECTION_THRESHOLD", 0.3)),
+                        help="Percentage of frames (0.0-1.0) required to classify video as watercolor (default: 0.3)")
+    parser.add_argument("--strict-mode", action="store_true",
+                        default=os.getenv("WATERCOLOR_STRICT_MODE", "false").lower() == "true",
+                        help="Enable strict multi-condition classification to minimize false positives")
+    parser.add_argument("--immich-url", default=os.getenv("IMMICH_URL"),
+                        help="Immich Server URL (e.g., http://192.168.1.100:2283)")
     parser.add_argument("--immich-key", default=os.getenv("IMMICH_API_KEY"), help="Immich API Key")
-    parser.add_argument("--immich-tag", default=os.getenv("IMMICH_TAG", "Watercolor"), help="Tag name to apply in Immich (default: Watercolor)")
-    parser.add_argument("--immich-path-mapping", default=vals.get("IMMICH_PATH_MAPPING"), help="Path mappings in format 'local:remote;local2:remote2' (e.g., '/mnt/photos:/usr/src/app/photos')")
-    parser.add_argument("--move-tagged-assets", action="store_true", default=vals.get("MOVE_TAGGED_ASSETS", "false").lower() == "true", help="Move assets with IMMICH_TAG to destination folder and delete from Immich")
-    parser.add_argument("--move-destination", default=vals.get("MOVE_DESTINATION_ROOT"), help="Destination root folder for moved assets")
-    parser.add_argument("--dry-run", action="store_true", default=vals.get("MOVE_DRY_RUN", "false").lower() == "true", help="Simulate move operation without actually moving files or deleting from Immich")
-    parser.add_argument("--csv-report", help="Path to save CSV report of move operations")
-    parser.add_argument("--transaction-log", help="Path to save transaction log JSON file")
+    parser.add_argument("--immich-tag", default=os.getenv("IMMICH_TAG", "Watercolor"),
+                        help="Tag name to apply in Immich (default: Watercolor)")
+    parser.add_argument("--immich-path-mapping", default=vals.get("IMMICH_PATH_MAPPING"),
+                        help="Path mappings in format 'local:remote;local2:remote2' "
+                             "(e.g., '/mnt/photos:/usr/src/app/photos')")
+    parser.add_argument("--move-tagged-assets", action="store_true",
+                        default=vals.get("MOVE_TAGGED_ASSETS", "false").lower() == "true",
+                        help="Move assets with IMMICH_TAG to destination folder and delete from Immich")
+    parser.add_argument("--move-destination", default=vals.get("MOVE_DESTINATION_ROOT"),
+                        help="Destination root folder for moved assets")
+    parser.add_argument("--dry-run", action="store_true",
+                        default=vals.get("MOVE_DRY_RUN", "false").lower() == "true",
+                        help="Simulate move operation without actually moving files or deleting from Immich")
+    parser.add_argument("--csv-report", default=default_csv, help="Path to save CSV report of move operations")
+    parser.add_argument("--transaction-log", default=default_log, help="Path to save transaction log JSON file")
 
     args = parser.parse_args()
 
@@ -37,23 +60,23 @@ def main():
         if not args.move_destination:
             print("Error: --move-destination is required for move operation")
             sys.exit(1)
-        
+
         if not args.immich_url or not args.immich_key:
             print("Error: Immich URL and API key are required for move operation")
             sys.exit(1)
-        
+
         if not args.immich_path_mapping:
             print("Error: Path mapping is required for move operation")
             sys.exit(1)
-        
+
         # Confirmation prompt (skip in dry-run mode or if configured)
         skip_confirmation = vals.get("MOVE_SKIP_CONFIRMATION", "false").lower() == "true"
-        
+
         if not args.dry_run and not skip_confirmation:
             print(f"WARNING: This will move assets tagged '{args.immich_tag}' and DELETE them from Immich.")
             print(f"Destination: {args.move_destination}")
             confirm = input("Type 'yes' to continue: ")
-            
+
             if confirm.lower() != 'yes':
                 print("Operation cancelled.")
                 sys.exit(0)
@@ -63,47 +86,47 @@ def main():
             else:
                 print(f"Moving assets tagged '{args.immich_tag}' (confirmation skipped)")
             print(f"Destination: {args.move_destination}")
-        
+
         # Parse path mappings
         path_mappings = {}
         for mapping in args.immich_path_mapping.split(';'):
             if ':' in mapping:
                 local, remote = mapping.rsplit(':', 1)
                 path_mappings[local.strip()] = remote.strip()
-        
+
         # Initialize clients
         immich_client = ImmichClient(
             args.immich_url,
             args.immich_key,
             path_mappings
         )
-        
+
         asset_mover = AssetMover(
             immich_client,
             args.move_destination,
             path_mappings,
             dry_run=args.dry_run
         )
-        
+
         # Process assets
-        print(f"\nProcessing tagged assets...")
+        print("\nProcessing tagged assets...")
         results = asset_mover.process_tagged_assets(args.immich_tag)
-        
-        print(f"\n=== Results ===")
+
+        print("\n=== Results ===")
         print(f"Assets found: {results['total']}")
         print(f"Successfully moved: {results['moved']}")
         print(f"Failed to move: {results['failed']}")
         print(f"Deleted from Immich: {results['deleted']}")
-        
+
         # Save reports if requested
         if args.csv_report:
             asset_mover.save_csv_report(args.csv_report)
             print(f"\nCSV report saved to: {args.csv_report}")
-        
+
         if args.transaction_log:
             asset_mover.save_transaction_log(args.transaction_log)
             print(f"Transaction log saved to: {args.transaction_log}")
-        
+
         # Exit after move operation - do not proceed to classification
         sys.exit(0)
 
@@ -119,7 +142,6 @@ def main():
         # Batch processing
         output_csv = args.output
         if not output_csv:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             output_csv = f"watercolor_results_{timestamp}.csv"
             print(f"No output file specified. Using default: {output_csv}")
 
@@ -187,6 +209,7 @@ def main():
         else:
             print(f"Unsupported file extension: {ext}")
             print("Please provide an image, video, or folder.")
+
 
 if __name__ == "__main__":
     main()

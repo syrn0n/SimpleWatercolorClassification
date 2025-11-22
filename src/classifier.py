@@ -1,7 +1,8 @@
 import torch
 from PIL import Image
 from transformers import CLIPProcessor, CLIPModel
-from typing import List, Union, Dict
+from typing import Union, Dict
+
 
 class WatercolorClassifier:
     def __init__(self, model_name: str = "openai/clip-vit-base-patch32"):
@@ -72,8 +73,8 @@ class WatercolorClassifier:
         return wc_prob > threshold and max(probs, key=probs.get) == "a watercolor painting"
 
     def is_watercolor_strict(self, image_path: str, threshold: float = 0.85,
-                            min_margin: float = 0.15, max_photo_prob: float = 0.3,
-                            max_digital_prob: float = 0.3) -> bool:
+                              min_margin: float = 0.15, max_photo_prob: float = 0.3,
+                              max_digital_prob: float = 0.3) -> bool:
         """
         Strict watercolor classification with multiple conditions to minimize false positives.
 

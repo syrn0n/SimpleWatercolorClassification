@@ -11,6 +11,7 @@ from src.batch_processor import BatchProcessor
 # Add project root to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+
 class TestBatchProcessor(unittest.TestCase):
     def setUp(self):
         self.test_dir = "test_batch_folder"
@@ -54,6 +55,7 @@ class TestBatchProcessor(unittest.TestCase):
         paths = [r["file_path"] for r in rows]
         self.assertIn(self.img1, paths)
         self.assertIn(self.img2, paths)
+
 
 if __name__ == '__main__':
     unittest.main()

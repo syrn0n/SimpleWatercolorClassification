@@ -2,6 +2,7 @@ import requests
 import os
 from typing import Optional, Dict
 
+
 class ImmichClient:
     def __init__(self, url: str, api_key: str, path_mappings: Dict[str, str] = None):
         self.url = url.rstrip('/')
@@ -46,7 +47,7 @@ class ImmichClient:
                 assets = results.get('assets', {}).get('items', [])
 
                 if assets:
-                    # Return the first match. 
+                    # Return the first match.
                     # Since we searched by exact path, it should be the correct one.
                     return assets[0]['id']
 

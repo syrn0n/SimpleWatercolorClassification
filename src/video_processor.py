@@ -1,8 +1,9 @@
 import cv2
 from PIL import Image
-from typing import Dict, List
+from typing import Dict
 from tqdm import tqdm
 from .classifier import WatercolorClassifier
+
 
 class VideoProcessor:
     def __init__(self, classifier: WatercolorClassifier):
@@ -56,7 +57,7 @@ class VideoProcessor:
         # Calculate planned frames
         planned_frames_count = 0
         if total_frames > 0:
-            planned_frames_count = (total_frames // frame_interval) + 1 # Approximate
+            planned_frames_count = (total_frames // frame_interval) + 1  # Approximate
 
         # Optimization: Early stopping
         # If we have many frames to process, check after 10% if we already have a positive result
