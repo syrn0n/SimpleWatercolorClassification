@@ -6,6 +6,7 @@ import os
 from unittest.mock import patch, Mock
 from src.immich_client import ImmichClient
 
+
 class TestCrossPlatformPaths:
     """Test cross-platform path handling"""
 

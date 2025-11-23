@@ -171,66 +171,73 @@ class AssetMover:
 
         # Process each asset with progress bar
         for asset in tqdm(assets, desc="Processing assets", unit="asset"):
-            asset_id = asset.get('id')
-            immich_path = asset.get('originalPath')
-
-            transaction = {
-                'asset_id': asset_id,
-                'immich_path': immich_path,
-                'source_path': None,
-                'dest_path': None,
-                'move_success': False,
-                'delete_success': False,
-                'error': None
-            }
-
-            if not immich_path:
-                transaction['error'] = 'No originalPath'
-                results["failed"] += 1
-                self.transaction_log.append(transaction)
-                continue
-
-            # Reverse map to local source path
-            source_path = self.immich_client.reverse_path_mapping(immich_path)
-            transaction['source_path'] = source_path
-
-            if not source_path:
-                transaction['error'] = 'No path mapping found'
-                results["failed"] += 1
-                self.transaction_log.append(transaction)
-                continue
-
-            # Calculate destination path
-            dest_path = self.calculate_destination_path(immich_path)
-            transaction['dest_path'] = dest_path
-
-            if not dest_path:
-                transaction['error'] = 'Could not calculate destination'
-                results["failed"] += 1
-                self.transaction_log.append(transaction)
-                continue
-
-            # Attempt to move file
-            move_success = self.move_file(source_path, dest_path)
-            transaction['move_success'] = move_success
-
-            if move_success:
-                results["moved"] += 1
-
-                # Only delete from Immich if move succeeded and not dry-run
-                if not self.dry_run:
-                    delete_success = self.immich_client.delete_asset(asset_id)
-                    transaction['delete_success'] = delete_success
-
-                    if delete_success:
-                        results["deleted"] += 1
-                else:
-                    transaction['delete_success'] = True  # Would delete in real run
-                    results["deleted"] += 1
-            else:
-                transaction['error'] = 'Move failed'
-                results["failed"] += 1
-
-            self.transaction_log.append(transaction)
+            self._process_single_asset(asset, results)
 
         return results
+
+    def _process_single_asset(self, asset: Dict, results: Dict[str, int]):
+        """
+        Process a single asset: calculate paths, move, and delete.
+        Updates results dict and transaction log in place.
+        """
+        asset_id = asset.get('id')
+        immich_path = asset.get('originalPath')
+
+        transaction = {
+            'asset_id': asset_id,
+            'immich_path': immich_path,
+            'source_path': None,
+            'dest_path': None,
+            'move_success': False,
+            'delete_success': False,
+            'error': None
+        }
+
+        if not immich_path:
+            transaction['error'] = 'No originalPath'
+            results["failed"] += 1
+            self.transaction_log.append(transaction)
+            return
+
+        # Reverse map to local source path
+        source_path = self.immich_client.reverse_path_mapping(immich_path)
+        transaction['source_path'] = source_path
+
+        if not source_path:
+            transaction['error'] = 'No path mapping found'
+            results["failed"] += 1
+            self.transaction_log.append(transaction)
+            return
+
+        # Calculate destination path
+        dest_path = self.calculate_destination_path(immich_path)
+        transaction['dest_path'] = dest_path
+
+        if not dest_path:
+            transaction['error'] = 'Could not calculate destination'
+            results["failed"] += 1
+            self.transaction_log.append(transaction)
+            return
+
+        # Attempt to move file
+        move_success = self.move_file(source_path, dest_path)
+        transaction['move_success'] = move_success
+
+        if move_success:
+            results["moved"] += 1
+
+            # Only delete from Immich if move succeeded and not dry-run
+            if not self.dry_run:
+                delete_success = self.immich_client.delete_asset(asset_id)
+                transaction['delete_success'] = delete_success
+
+                if delete_success:
+                    results["deleted"] += 1
+            else:
+                transaction['delete_success'] = True  # Would delete in real run
+                results["deleted"] += 1
+        else:
+            transaction['error'] = 'Move failed'
+            results["failed"] += 1
+
+        self.transaction_log.append(transaction)

@@ -11,15 +11,8 @@ from src.immich_client import ImmichClient
 from src.database import DatabaseManager
 
 
-def main():
-    load_dotenv()
-    vals = dotenv_values()
-
-    # Generate timestamp for default report names
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    default_csv = f"move_report_{timestamp}.csv"
-    default_log = f"move_log_{timestamp}.json"
-
+def parse_arguments(default_csv, default_log, vals):
+    """Parse command line arguments."""
     parser = argparse.ArgumentParser(description="Classify images or videos as watercolor paintings.")
     parser.add_argument("path", nargs='?', help="Path to the image, video, or folder")
     parser.add_argument("--threshold", type=float, default=float(os.getenv("WATERCOLOR_THRESHOLD", 0.85)),
@@ -61,9 +54,11 @@ def main():
     parser.add_argument("--clear-cache", action="store_true", help="Clear the classification cache")
     parser.add_argument("--cache-stats", action="store_true", help="Show cache statistics")
 
-    args = parser.parse_args()
+    return parser.parse_args()
 
-    # Handle cache operations
+
+def handle_cache_operations(args):
+    """Handle cache clearing and statistics."""
     if args.clear_cache:
         db = DatabaseManager(args.db_path)
         db.clear_cache()
@@ -80,84 +75,178 @@ def main():
         if not args.path:
             sys.exit(0)
 
+
+def handle_move_operation(args, vals):
+    """Handle the move-tagged-assets operation."""
+    # Validate required parameters
+    if not args.move_destination:
+        print("Error: --move-destination is required for move operation")
+        sys.exit(1)
+
+    if not args.immich_url or not args.immich_key:
+        print("Error: Immich URL and API key are required for move operation")
+        sys.exit(1)
+
+    if not args.immich_path_mapping:
+        print("Error: Path mapping is required for move operation")
+        sys.exit(1)
+
+    # Confirmation prompt (skip in dry-run mode or if configured)
+    skip_confirmation = vals.get("MOVE_SKIP_CONFIRMATION", "false").lower() == "true"
+
+    if not args.dry_run and not skip_confirmation:
+        print(f"WARNING: This will move assets tagged '{args.immich_tag}' and DELETE them from Immich.")
+        print(f"Destination: {args.move_destination}")
+        confirm = input("Type 'yes' to continue: ")
+
+        if confirm.lower() != 'yes':
+            print("Operation cancelled.")
+            sys.exit(0)
+    else:
+        if args.dry_run:
+            print(f"DRY RUN MODE: Simulating move of assets tagged '{args.immich_tag}'")
+        else:
+            print(f"Moving assets tagged '{args.immich_tag}' (confirmation skipped)")
+        print(f"Destination: {args.move_destination}")
+
+    # Parse path mappings
+    path_mappings = {}
+    for mapping in args.immich_path_mapping.split(';'):
+        if ':' in mapping:
+            local, remote = mapping.rsplit(':', 1)
+            path_mappings[local.strip()] = remote.strip()
+
+    # Initialize clients
+    immich_client = ImmichClient(
+        args.immich_url,
+        args.immich_key,
+        path_mappings
+    )
+
+    asset_mover = AssetMover(
+        immich_client,
+        args.move_destination,
+        path_mappings,
+        dry_run=args.dry_run
+    )
+
+    # Process assets
+    print("\nProcessing tagged assets...")
+    results = asset_mover.process_tagged_assets(args.immich_tag)
+
+    print("\n=== Results ===")
+    print(f"Assets found: {results['total']}")
+    print(f"Successfully moved: {results['moved']}")
+    print(f"Failed to move: {results['failed']}")
+    print(f"Deleted from Immich: {results['deleted']}")
+
+    # Save reports if requested
+    if args.csv_report:
+        asset_mover.save_csv_report(args.csv_report)
+        print(f"\nCSV report saved to: {args.csv_report}")
+
+    if args.transaction_log:
+        asset_mover.save_transaction_log(args.transaction_log)
+        print(f"Transaction log saved to: {args.transaction_log}")
+
+    # Exit after move operation - do not proceed to classification
+    sys.exit(0)
+
+
+def process_single_file(args, classifier, video_processor):
+    """Process a single file (image or video)."""
+    ext = os.path.splitext(args.path)[1].lower()
+    video_exts = ['.mp4', '.avi', '.mov', '.mkv']
+    image_exts = ['.jpg', '.jpeg', '.png', '.bmp', '.webp', '.tiff']
+
+    if ext in video_exts:
+        print(f"Detected video file: {args.path}")
+        result = video_processor.process_video_with_cache(
+            args.path, force=args.force_reprocess,
+            min_frames=args.min_frames,
+            detection_threshold=args.detection_threshold,
+            strict_mode=args.strict_mode,
+            image_threshold=args.threshold
+        )
+
+        print("\n--- Video Results ---")
+        print(f"Is Watercolor: {result['is_watercolor']}")
+        print(f"Average Confidence: {result['confidence']:.2%}")
+        print(f"Percentage of Watercolor Frames: {result['percent_watercolor_frames']:.2%}")
+
+    elif ext in image_exts:
+        print(f"Detected image file: {args.path}")
+        result = classifier.classify_with_cache(
+            args.path, threshold=args.threshold,
+            strict_mode=args.strict_mode, force=args.force_reprocess
+        )
+        is_wc = result['is_watercolor']
+        confidence = result['confidence']
+
+        print("\n--- Image Results ---")
+        print(f"Is Watercolor: {is_wc}")
+        print(f"Confidence: {confidence:.2%}")
+
+    else:
+        print(f"Unsupported file extension: {ext}")
+        print("Please provide an image, video, or folder.")
+
+
+def process_batch(args, classifier, video_processor, timestamp):
+    """Process a folder of files."""
+    output_csv = args.output
+    if not output_csv:
+        output_csv = f"watercolor_results_{timestamp}.csv"
+        print(f"No output file specified. Using default: {output_csv}")
+
+    # Parse path mappings
+    path_mappings = {}
+    if args.immich_path_mapping:
+        try:
+            for mapping in args.immich_path_mapping.split(';'):
+                if ':' in mapping:
+                    local, remote = mapping.rsplit(':', 1)
+                    path_mappings[local.strip()] = remote.strip()
+        except Exception as e:
+            print(f"Error parsing path mappings: {e}")
+            sys.exit(1)
+
+    print(f"Processing folder: {args.path}")
+    batch_processor = BatchProcessor(classifier, video_processor)
+    batch_processor.process_folder(
+        args.path, output_csv, min_frames=args.min_frames,
+        detection_threshold=args.detection_threshold,
+        strict_mode=args.strict_mode,
+        image_threshold=args.threshold,
+        immich_url=args.immich_url,
+        immich_api_key=args.immich_key,
+        immich_tag=args.immich_tag,
+        immich_path_mappings=path_mappings,
+        force_reprocess=args.force_reprocess
+    )
+
+
+def main():
+    load_dotenv()
+    vals = dotenv_values()
+
+    # Generate timestamp for default report names
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    default_csv = f"move_report_{timestamp}.csv"
+    default_log = f"move_log_{timestamp}.json"
+
+    args = parse_arguments(default_csv, default_log, vals)
+
+    # Handle cache operations
+    handle_cache_operations(args)
+
     if not args.path and not args.move_tagged_assets:
-        parser.error("the following arguments are required: path")
+        print("Error: the following arguments are required: path")
+        sys.exit(1)
 
     # Handle move-tagged-assets mode
     if args.move_tagged_assets:
-        # Validate required parameters
-        if not args.move_destination:
-            print("Error: --move-destination is required for move operation")
-            sys.exit(1)
-
-        if not args.immich_url or not args.immich_key:
-            print("Error: Immich URL and API key are required for move operation")
-            sys.exit(1)
-
-        if not args.immich_path_mapping:
-            print("Error: Path mapping is required for move operation")
-            sys.exit(1)
-
-        # Confirmation prompt (skip in dry-run mode or if configured)
-        skip_confirmation = vals.get("MOVE_SKIP_CONFIRMATION", "false").lower() == "true"
-
-        if not args.dry_run and not skip_confirmation:
-            print(f"WARNING: This will move assets tagged '{args.immich_tag}' and DELETE them from Immich.")
-            print(f"Destination: {args.move_destination}")
-            confirm = input("Type 'yes' to continue: ")
-
-            if confirm.lower() != 'yes':
-                print("Operation cancelled.")
-                sys.exit(0)
-        else:
-            if args.dry_run:
-                print(f"DRY RUN MODE: Simulating move of assets tagged '{args.immich_tag}'")
-            else:
-                print(f"Moving assets tagged '{args.immich_tag}' (confirmation skipped)")
-            print(f"Destination: {args.move_destination}")
-
-        # Parse path mappings
-        path_mappings = {}
-        for mapping in args.immich_path_mapping.split(';'):
-            if ':' in mapping:
-                local, remote = mapping.rsplit(':', 1)
-                path_mappings[local.strip()] = remote.strip()
-
-        # Initialize clients
-        immich_client = ImmichClient(
-            args.immich_url,
-            args.immich_key,
-            path_mappings
-        )
-
-        asset_mover = AssetMover(
-            immich_client,
-            args.move_destination,
-            path_mappings,
-            dry_run=args.dry_run
-        )
-
-        # Process assets
-        print("\nProcessing tagged assets...")
-        results = asset_mover.process_tagged_assets(args.immich_tag)
-
-        print("\n=== Results ===")
-        print(f"Assets found: {results['total']}")
-        print(f"Successfully moved: {results['moved']}")
-        print(f"Failed to move: {results['failed']}")
-        print(f"Deleted from Immich: {results['deleted']}")
-
-        # Save reports if requested
-        if args.csv_report:
-            asset_mover.save_csv_report(args.csv_report)
-            print(f"\nCSV report saved to: {args.csv_report}")
-
-        if args.transaction_log:
-            asset_mover.save_transaction_log(args.transaction_log)
-            print(f"Transaction log saved to: {args.transaction_log}")
-
-        # Exit after move operation - do not proceed to classification
-        sys.exit(0)
+        handle_move_operation(args, vals)
 
     # Continue with normal classification flow
     if not os.path.exists(args.path):
@@ -169,75 +258,9 @@ def main():
     video_processor = VideoProcessor(classifier, db_path=args.db_path, use_cache=use_cache)
 
     if os.path.isdir(args.path):
-        # Batch processing
-        output_csv = args.output
-        if not output_csv:
-            output_csv = f"watercolor_results_{timestamp}.csv"
-            print(f"No output file specified. Using default: {output_csv}")
-
-        # Parse path mappings
-        path_mappings = {}
-        if args.immich_path_mapping:
-            try:
-                for mapping in args.immich_path_mapping.split(';'):
-                    if ':' in mapping:
-                        local, remote = mapping.rsplit(':', 1)
-                        path_mappings[local.strip()] = remote.strip()
-            except Exception as e:
-                print(f"Error parsing path mappings: {e}")
-                sys.exit(1)
-
-        print(f"Processing folder: {args.path}")
-        batch_processor = BatchProcessor(classifier, video_processor)
-        batch_processor.process_folder(
-            args.path, output_csv, min_frames=args.min_frames,
-            detection_threshold=args.detection_threshold,
-            strict_mode=args.strict_mode,
-            image_threshold=args.threshold,
-            immich_url=args.immich_url,
-            immich_api_key=args.immich_key,
-            immich_tag=args.immich_tag,
-            immich_path_mappings=path_mappings,
-            force_reprocess=args.force_reprocess
-        )
-
+        process_batch(args, classifier, video_processor, timestamp)
     else:
-        # Single file processing
-        ext = os.path.splitext(args.path)[1].lower()
-        video_exts = ['.mp4', '.avi', '.mov', '.mkv']
-        image_exts = ['.jpg', '.jpeg', '.png', '.bmp', '.webp', '.tiff']
-
-        if ext in video_exts:
-            print(f"Detected video file: {args.path}")
-            result = video_processor.process_video_with_cache(
-                args.path, force=args.force_reprocess,
-                min_frames=args.min_frames,
-                detection_threshold=args.detection_threshold,
-                strict_mode=args.strict_mode,
-                image_threshold=args.threshold
-            )
-
-            print("\n--- Video Results ---")
-            print(f"Is Watercolor: {result['is_watercolor']}")
-            print(f"Average Confidence: {result['confidence']:.2%}")
-            print(f"Percentage of Watercolor Frames: {result['percent_watercolor_frames']:.2%}")
-
-        elif ext in image_exts:
-            print(f"Detected image file: {args.path}")
-            result = classifier.classify_with_cache(
-                args.path, threshold=args.threshold,
-                strict_mode=args.strict_mode, force=args.force_reprocess
-            )
-            is_wc = result['is_watercolor']
-            confidence = result['confidence']
-
-            print("\n--- Image Results ---")
-            print(f"Is Watercolor: {is_wc}")
-            print(f"Confidence: {confidence:.2%}")
-
-        else:
-            print(f"Unsupported file extension: {ext}")
-            print("Please provide an image, video, or folder.")
+        process_single_file(args, classifier, video_processor)
 
 
 if __name__ == "__main__":
