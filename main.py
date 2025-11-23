@@ -8,6 +8,7 @@ from src.video_processor import VideoProcessor
 from src.batch_processor import BatchProcessor
 from src.asset_mover import AssetMover
 from src.immich_client import ImmichClient
+from src.database import DatabaseManager
 
 
 def main():
@@ -20,7 +21,7 @@ def main():
     default_log = f"move_log_{timestamp}.json"
 
     parser = argparse.ArgumentParser(description="Classify images or videos as watercolor paintings.")
-    parser.add_argument("path", help="Path to the image, video, or folder")
+    parser.add_argument("path", nargs='?', help="Path to the image, video, or folder")
     parser.add_argument("--threshold", type=float, default=float(os.getenv("WATERCOLOR_THRESHOLD", 0.85)),
                         help="Confidence threshold for classification")
     parser.add_argument("--output", default=os.getenv("WATERCOLOR_OUTPUT"),
@@ -51,8 +52,36 @@ def main():
                         help="Simulate move operation without actually moving files or deleting from Immich")
     parser.add_argument("--csv-report", default=default_csv, help="Path to save CSV report of move operations")
     parser.add_argument("--transaction-log", default=default_log, help="Path to save transaction log JSON file")
+    parser.add_argument("--db-path", default=os.getenv("CLASSIFICATION_DB_PATH", "classification_cache.db"),
+                        help="Path to SQLite database for caching results")
+    parser.add_argument("--no-cache", action="store_true",
+                        default=os.getenv("DISABLE_CACHE", "false").lower() == "true",
+                        help="Disable database caching")
+    parser.add_argument("--force-reprocess", action="store_true", help="Force reprocessing of files even if cached")
+    parser.add_argument("--clear-cache", action="store_true", help="Clear the classification cache")
+    parser.add_argument("--cache-stats", action="store_true", help="Show cache statistics")
 
     args = parser.parse_args()
+
+    # Handle cache operations
+    if args.clear_cache:
+        db = DatabaseManager(args.db_path)
+        db.clear_cache()
+        print("Cache cleared.")
+        if not args.path:
+            sys.exit(0)
+
+    if args.cache_stats:
+        db = DatabaseManager(args.db_path)
+        stats = db.get_statistics()
+        print("\n=== Cache Statistics ===")
+        for key, value in stats.items():
+            print(f"{key}: {value}")
+        if not args.path:
+            sys.exit(0)
+
+    if not args.path and not args.move_tagged_assets:
+        parser.error("the following arguments are required: path")
 
     # Handle move-tagged-assets mode
     if args.move_tagged_assets:
@@ -135,8 +164,9 @@ def main():
         print(f"Error: Path not found at {args.path}")
         sys.exit(1)
 
-    classifier = WatercolorClassifier()
-    video_processor = VideoProcessor(classifier)
+    use_cache = not args.no_cache
+    classifier = WatercolorClassifier(db_path=args.db_path, use_cache=use_cache)
+    video_processor = VideoProcessor(classifier, db_path=args.db_path, use_cache=use_cache)
 
     if os.path.isdir(args.path):
         # Batch processing
@@ -167,7 +197,8 @@ def main():
             immich_url=args.immich_url,
             immich_api_key=args.immich_key,
             immich_tag=args.immich_tag,
-            immich_path_mappings=path_mappings
+            immich_path_mappings=path_mappings,
+            force_reprocess=args.force_reprocess
         )
 
     else:
@@ -178,8 +209,9 @@ def main():
 
         if ext in video_exts:
             print(f"Detected video file: {args.path}")
-            result = video_processor.process_video(
-                args.path, min_frames=args.min_frames,
+            result = video_processor.process_video_with_cache(
+                args.path, force=args.force_reprocess,
+                min_frames=args.min_frames,
                 detection_threshold=args.detection_threshold,
                 strict_mode=args.strict_mode,
                 image_threshold=args.threshold
@@ -192,19 +224,16 @@ def main():
 
         elif ext in image_exts:
             print(f"Detected image file: {args.path}")
-            probs = classifier.predict(args.path)
-
-            if args.strict_mode:
-                is_wc = classifier.is_watercolor_strict(args.path, threshold=args.threshold)
-            else:
-                is_wc = classifier.is_watercolor(args.path, threshold=args.threshold)
+            result = classifier.classify_with_cache(
+                args.path, threshold=args.threshold,
+                strict_mode=args.strict_mode, force=args.force_reprocess
+            )
+            is_wc = result['is_watercolor']
+            confidence = result['confidence']
 
             print("\n--- Image Results ---")
             print(f"Is Watercolor: {is_wc}")
-            print(f"Confidence: {probs['a watercolor painting']:.2%}")
-            print("\nFull Probabilities:")
-            for label, prob in sorted(probs.items(), key=lambda x: x[1], reverse=True):
-                print(f"  {label}: {prob:.2%}")
+            print(f"Confidence: {confidence:.2%}")
 
         else:
             print(f"Unsupported file extension: {ext}")

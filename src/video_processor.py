@@ -1,13 +1,16 @@
 import cv2
 from PIL import Image
-from typing import Dict
+from typing import Dict, Optional
+from .database import DatabaseManager
 from tqdm import tqdm
 from .classifier import WatercolorClassifier
 
 
 class VideoProcessor:
-    def __init__(self, classifier: WatercolorClassifier):
+    def __init__(self, classifier: WatercolorClassifier, db_path: str = None, use_cache: bool = True):
         self.classifier = classifier
+        self.use_cache = use_cache
+        self.db = DatabaseManager(db_path) if db_path and use_cache else None
 
     def process_video(self, video_path: str, sample_interval_sec: float = 1.0, min_frames: int = 3,
                      detection_threshold: float = 0.3, strict_mode: bool = False,
@@ -163,3 +166,26 @@ class VideoProcessor:
             "watercolor_frames_count": watercolor_frames_count,
             "avg_watercolor_confidence": avg_watercolor_confidence
         }
+
+    def process_video_with_cache(self, video_path: str, force: bool = False, **kwargs) -> Dict:
+        """
+        Process video with database caching.
+        """
+        # Check cache if enabled
+        if self.db and not force:
+            needs_processing, cached = self.db.check_if_processed(video_path)
+            if not needs_processing:
+                return cached
+        
+        # Process video
+        result = self.process_video(video_path, **kwargs)
+        
+        # Add file path and type
+        result['file_path'] = video_path
+        result['file_type'] = 'video'
+        
+        # Save to cache
+        if self.db:
+            self.db.save_result(video_path, result)
+        
+        return result

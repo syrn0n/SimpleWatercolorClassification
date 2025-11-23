@@ -11,8 +11,8 @@ class TestImmichClientPathMapping(unittest.TestCase):
         }
         self.client = ImmichClient("http://localhost:2283", "test-key", self.mappings)
 
-    @patch('requests.get')
-    def test_get_asset_id_with_mapping(self, mock_get):
+    @patch('requests.post')
+    def test_get_asset_id_with_mapping(self, mock_post):
         # Mock search response
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -27,7 +27,7 @@ class TestImmichClientPathMapping(unittest.TestCase):
                 ]
             }
         }
-        mock_get.return_value = mock_response
+        mock_post.return_value = mock_response
 
         # Local path that should be mapped
         local_path = "/mnt/photos/vacation/img.jpg"
@@ -35,8 +35,8 @@ class TestImmichClientPathMapping(unittest.TestCase):
         asset_id = self.client.get_asset_id_from_path(local_path)
         self.assertEqual(asset_id, "asset-mapped")
 
-    @patch('requests.get')
-    def test_get_asset_id_without_mapping_match(self, mock_get):
+    @patch('requests.post')
+    def test_get_asset_id_without_mapping_match(self, mock_post):
         # Mock search response
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -51,7 +51,7 @@ class TestImmichClientPathMapping(unittest.TestCase):
                 ]
             }
         }
-        mock_get.return_value = mock_response
+        mock_post.return_value = mock_response
 
         # Path that doesn't match any mapping prefix
         local_path = "/other/path/img.jpg"
@@ -59,8 +59,8 @@ class TestImmichClientPathMapping(unittest.TestCase):
         asset_id = self.client.get_asset_id_from_path(local_path)
         self.assertEqual(asset_id, "asset-direct")
 
-    @patch('requests.get')
-    def test_get_asset_id_mapping_mismatch(self, mock_get):
+    @patch('requests.post')
+    def test_get_asset_id_mapping_mismatch(self, mock_post):
         # Mock search response where mapped path doesn't match originalPath
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -75,7 +75,7 @@ class TestImmichClientPathMapping(unittest.TestCase):
                 ]
             }
         }
-        mock_get.return_value = mock_response
+        mock_post.return_value = mock_response
 
         local_path = "/mnt/photos/vacation/img.jpg"
         # Mapped: /usr/src/app/photos/vacation/img.jpg

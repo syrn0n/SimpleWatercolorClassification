@@ -48,8 +48,10 @@ class ImmichClient:
 
                 if assets:
                     # Return the first match.
-                    # Since we searched by exact path, it should be the correct one.
-                    return assets[0]['id']
+                    # Verify that the returned asset's path matches what we requested
+                    asset = assets[0]
+                    if asset.get('originalPath') == translated_path:
+                        return asset['id']
 
         except Exception as e:
             print(f"Error searching for asset {file_path}: {e}")
@@ -64,6 +66,8 @@ class ImmichClient:
             if immich_path.startswith(server_prefix):
                 # Remove server prefix
                 relative_path = immich_path[len(server_prefix):]
+                # Replace forward slashes with OS-appropriate separators
+                relative_path = relative_path.replace('/', os.sep)
                 # Add local prefix
                 local_path = local_prefix + relative_path
                 # Normalize path separators for local OS

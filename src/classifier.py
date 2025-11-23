@@ -1,11 +1,12 @@
 import torch
 from PIL import Image
 from transformers import CLIPProcessor, CLIPModel
-from typing import Union, Dict
+from typing import Union, Dict, Optional
+from .database import DatabaseManager
 
 
 class WatercolorClassifier:
-    def __init__(self, model_name: str = "openai/clip-vit-base-patch32"):
+    def __init__(self, model_name: str = "openai/clip-vit-base-patch32", db_path: str = None, use_cache: bool = True):
         """
         Initialize the CLIP model and processor.
         """
@@ -30,6 +31,10 @@ class WatercolorClassifier:
             "a black and white photo"
         ]
         self.target_label = "a watercolor painting"
+        
+        # Database integration
+        self.use_cache = use_cache
+        self.db = DatabaseManager(db_path) if db_path and use_cache else None
 
     def predict(self, image: Union[str, Image.Image]) -> Dict[str, float]:
         """
@@ -113,3 +118,50 @@ class WatercolorClassifier:
             return False
 
         return True
+
+    def classify_with_cache(self, image_path: str, threshold: float = 0.85,
+                           strict_mode: bool = False, force: bool = False) -> Dict:
+        """
+        Classify image with database caching.
+        """
+        # Skip cache if not a file path
+        if not isinstance(image_path, str):
+            if strict_mode:
+                is_wc = self.is_watercolor_strict(image_path, threshold)
+            else:
+                is_wc = self.is_watercolor(image_path, threshold)
+            
+            probs = self.predict(image_path)
+            return {
+                'file_path': None,
+                'file_type': 'image',
+                'is_watercolor': is_wc,
+                'confidence': probs.get("a watercolor painting", 0.0)
+            }
+
+        # Check cache if enabled
+        if self.db and not force:
+            needs_processing, cached = self.db.check_if_processed(image_path)
+            if not needs_processing:
+                return cached
+        
+        # Process image
+        if strict_mode:
+            is_wc = self.is_watercolor_strict(image_path, threshold)
+        else:
+            is_wc = self.is_watercolor(image_path, threshold)
+        
+        probs = self.predict(image_path)
+        
+        result = {
+            'file_path': image_path,
+            'file_type': 'image',
+            'is_watercolor': is_wc,
+            'confidence': probs.get("a watercolor painting", 0.0)
+        }
+        
+        # Save to cache
+        if self.db:
+            self.db.save_result(image_path, result)
+        
+        return result

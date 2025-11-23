@@ -18,7 +18,8 @@ class BatchProcessor:
                        detection_threshold: float = 0.3, strict_mode: bool = False,
                        image_threshold: float = 0.85,
                        immich_url: str = None, immich_api_key: str = None, immich_tag: str = "Watercolor",
-                       immich_path_mappings: Dict[str, str] = None):
+                       immich_path_mappings: Dict[str, str] = None,
+                       force_reprocess: bool = False):
         """
         Recursively process a folder and write results to a CSV file.
         """
@@ -54,11 +55,12 @@ class BatchProcessor:
             try:
                 if ext in self.video_exts:
                     # Video processing
-                    vid_result = self.video_processor.process_video(
-                        file_path, min_frames=min_frames, detection_threshold=detection_threshold,
+                    vid_result = self.video_processor.process_video_with_cache(
+                        file_path, force=force_reprocess, min_frames=min_frames, detection_threshold=detection_threshold,
                         strict_mode=strict_mode, image_threshold=image_threshold
                     )
                     results.append({
+                        "file_path": file_path,
                         "folder": os.path.dirname(file_path),
                         "filename": os.path.basename(file_path),
                         "type": "video",
@@ -74,17 +76,16 @@ class BatchProcessor:
                     })
                 elif ext in self.image_exts:
                     # Image processing
-                    probs = self.classifier.predict(file_path)
-
-                    # Use strict mode if enabled
-                    if strict_mode:
-                        is_wc = self.classifier.is_watercolor_strict(file_path, threshold=image_threshold)
-                    else:
-                        is_wc = self.classifier.is_watercolor(file_path, threshold=image_threshold)
-
-                    wc_prob = probs.get("a watercolor painting", 0.0)
+                    img_result = self.classifier.classify_with_cache(
+                        file_path, threshold=image_threshold,
+                        strict_mode=strict_mode, force=force_reprocess
+                    )
+                    
+                    is_wc = img_result['is_watercolor']
+                    wc_prob = img_result['confidence']
 
                     results.append({
+                        "file_path": file_path,
                         "folder": os.path.dirname(file_path),
                         "filename": os.path.basename(file_path),
                         "type": "image",
@@ -112,6 +113,7 @@ class BatchProcessor:
             except Exception as e:
                 print(f"Error processing {file_path}: {e}")
                 results.append({
+                    "file_path": file_path,
                     "folder": os.path.dirname(file_path),
                     "filename": os.path.basename(file_path),
                     "type": "error",
@@ -132,7 +134,7 @@ class BatchProcessor:
 
     def _write_csv(self, results: List[Dict], output_csv: str):
         fieldnames = [
-            "folder", "filename", "type", "is_watercolor", "confidence",
+            "file_path", "folder", "filename", "type", "is_watercolor", "confidence",
             "duration_seconds", "processed_frames", "planned_frames", "total_frames",
             "watercolor_frames_count", "watercolor_frames_percent",
             "avg_watercolor_confidence"
