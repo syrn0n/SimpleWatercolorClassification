@@ -76,9 +76,8 @@ def handle_cache_operations(args):
             sys.exit(0)
 
 
-def handle_move_operation(args, vals):
-    """Handle the move-tagged-assets operation."""
-    # Validate required parameters
+def validate_move_arguments(args):
+    """Validate arguments required for move operation."""
     if not args.move_destination:
         print("Error: --move-destination is required for move operation")
         sys.exit(1)
@@ -91,7 +90,9 @@ def handle_move_operation(args, vals):
         print("Error: Path mapping is required for move operation")
         sys.exit(1)
 
-    # Confirmation prompt (skip in dry-run mode or if configured)
+
+def confirm_move_operation(args, vals):
+    """Confirm move operation with user unless skipped."""
     skip_confirmation = vals.get("MOVE_SKIP_CONFIRMATION", "false").lower() == "true"
 
     if not args.dry_run and not skip_confirmation:
@@ -109,12 +110,51 @@ def handle_move_operation(args, vals):
             print(f"Moving assets tagged '{args.immich_tag}' (confirmation skipped)")
         print(f"Destination: {args.move_destination}")
 
-    # Parse path mappings
+
+def parse_path_mappings_string(mapping_string):
+    """Parse path mapping string into a dictionary."""
     path_mappings = {}
-    for mapping in args.immich_path_mapping.split(';'):
-        if ':' in mapping:
-            local, remote = mapping.rsplit(':', 1)
-            path_mappings[local.strip()] = remote.strip()
+    if not mapping_string:
+        return path_mappings
+
+    try:
+        for mapping in mapping_string.split(';'):
+            if ':' in mapping:
+                local, remote = mapping.rsplit(':', 1)
+                path_mappings[local.strip()] = remote.strip()
+    except Exception as e:
+        print(f"Error parsing path mappings: {e}")
+        sys.exit(1)
+
+    return path_mappings
+
+
+def print_move_results(results):
+    """Print summary of move operation results."""
+    print("\n=== Results ===")
+    print(f"Assets found: {results['total']}")
+    print(f"Successfully moved: {results['moved']}")
+    print(f"Failed to move: {results['failed']}")
+    print(f"Deleted from Immich: {results['deleted']}")
+
+
+def save_move_reports(args, asset_mover):
+    """Save CSV report and transaction log if requested."""
+    if args.csv_report:
+        asset_mover.save_csv_report(args.csv_report)
+        print(f"\nCSV report saved to: {args.csv_report}")
+
+    if args.transaction_log:
+        asset_mover.save_transaction_log(args.transaction_log)
+        print(f"Transaction log saved to: {args.transaction_log}")
+
+
+def handle_move_operation(args, vals):
+    """Handle the move-tagged-assets operation."""
+    validate_move_arguments(args)
+    confirm_move_operation(args, vals)
+
+    path_mappings = parse_path_mappings_string(args.immich_path_mapping)
 
     # Initialize clients
     immich_client = ImmichClient(
@@ -134,20 +174,8 @@ def handle_move_operation(args, vals):
     print("\nProcessing tagged assets...")
     results = asset_mover.process_tagged_assets(args.immich_tag)
 
-    print("\n=== Results ===")
-    print(f"Assets found: {results['total']}")
-    print(f"Successfully moved: {results['moved']}")
-    print(f"Failed to move: {results['failed']}")
-    print(f"Deleted from Immich: {results['deleted']}")
-
-    # Save reports if requested
-    if args.csv_report:
-        asset_mover.save_csv_report(args.csv_report)
-        print(f"\nCSV report saved to: {args.csv_report}")
-
-    if args.transaction_log:
-        asset_mover.save_transaction_log(args.transaction_log)
-        print(f"Transaction log saved to: {args.transaction_log}")
+    print_move_results(results)
+    save_move_reports(args, asset_mover)
 
     # Exit after move operation - do not proceed to classification
     sys.exit(0)
@@ -200,16 +228,7 @@ def process_batch(args, classifier, video_processor, timestamp):
         print(f"No output file specified. Using default: {output_csv}")
 
     # Parse path mappings
-    path_mappings = {}
-    if args.immich_path_mapping:
-        try:
-            for mapping in args.immich_path_mapping.split(';'):
-                if ':' in mapping:
-                    local, remote = mapping.rsplit(':', 1)
-                    path_mappings[local.strip()] = remote.strip()
-        except Exception as e:
-            print(f"Error parsing path mappings: {e}")
-            sys.exit(1)
+    path_mappings = parse_path_mappings_string(args.immich_path_mapping)
 
     print(f"Processing folder: {args.path}")
     batch_processor = BatchProcessor(classifier, video_processor)
