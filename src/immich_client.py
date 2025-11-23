@@ -7,7 +7,12 @@ class ImmichClient:
     def __init__(self, url: str, api_key: str, path_mappings: Dict[str, str] = None):
         self.url = url.rstrip('/')
         self.api_key = api_key
-        self.path_mappings = path_mappings or {}
+        # Normalize local paths in mappings to ensure OS-agnostic matching
+        self.path_mappings = {}
+        if path_mappings:
+            for local, remote in path_mappings.items():
+                self.path_mappings[os.path.normpath(local)] = remote
+
         self.headers = {
             'x-api-key': api_key,
             'Content-Type': 'application/json',
@@ -18,17 +23,31 @@ class ImmichClient:
         """
         Try to find an asset in Immich by its original file path.
         """
+        # Normalize input path for matching
+        normalized_path = os.path.normpath(file_path)
+
         # Translate path
-        translated_path = file_path
+        translated_path = file_path # Default to original if no mapping found
+
         for local_prefix, remote_prefix in self.path_mappings.items():
-            if file_path.startswith(local_prefix):
+            if normalized_path.startswith(local_prefix):
                 # Replace prefix
-                remote_suffix = file_path[len(local_prefix):]
-                translated_path = remote_prefix + remote_suffix
-                # Normalize slashes for remote (assuming Linux/Docker target)
-                translated_path = translated_path.replace('\\', '/')
+                # Get the relative part of the path
+                relative_path = normalized_path[len(local_prefix):]
+                # If relative path starts with a separator, remove it
+                if relative_path.startswith(os.sep):
+                    relative_path = relative_path[1:]
+
+                # Convert to forward slashes for Immich/Remote
+                remote_suffix = relative_path.replace(os.sep, '/')
+
+                # Join with remote prefix, ensuring single slash
+                if remote_prefix.endswith('/'):
+                    translated_path = remote_prefix + remote_suffix
+                else:
+                    translated_path = remote_prefix + '/' + remote_suffix
                 break
-        
+
         try:
             # Use the metadata search endpoint with originalPath
             search_url = f"{self.url}/api/search/metadata"
@@ -62,14 +81,22 @@ class ImmichClient:
         """
         Convert Immich server path to local file path.
         """
+        # Immich paths are always forward slashes
         for local_prefix, server_prefix in self.path_mappings.items():
             if immich_path.startswith(server_prefix):
                 # Remove server prefix
                 relative_path = immich_path[len(server_prefix):]
+
+                # Remove leading slash if present
+                if relative_path.startswith('/'):
+                    relative_path = relative_path[1:]
+
                 # Replace forward slashes with OS-appropriate separators
                 relative_path = relative_path.replace('/', os.sep)
-                # Add local prefix
-                local_path = local_prefix + relative_path
+
+                # Join with local prefix using os.path.join for correct separator handling
+                local_path = os.path.join(local_prefix, relative_path)
+
                 # Normalize path separators for local OS
                 return os.path.normpath(local_path)
         return None

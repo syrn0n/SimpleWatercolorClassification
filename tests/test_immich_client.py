@@ -2,15 +2,23 @@
 Tests for ImmichClient class
 """
 import pytest
+import os
 from unittest.mock import Mock, patch
 from src.immich_client import ImmichClient
+
+
+# Define OS-specific local prefix for testing
+if os.name == 'nt':
+    LOCAL_PREFIX = r"E:\library\library\admin"
+else:
+    LOCAL_PREFIX = "/tmp/library/admin"
 
 
 @pytest.fixture
 def immich_client():
     """Create ImmichClient instance for testing"""
     path_mappings = {
-        r"E:\library\library\admin": "/data/library/admin"
+        LOCAL_PREFIX: "/data/library/admin"
     }
     return ImmichClient(
         url="http://test-server:2283",
@@ -47,7 +55,8 @@ class TestReversePathMapping:
     def test_reverse_mapping_success(self, immich_client):
         """Test successful reverse path mapping"""
         immich_path = "/data/library/admin/2025/01/photo.jpg"
-        expected = r"E:\library\library\admin\2025\01\photo.jpg"
+        # Construct expected path using OS-specific separator
+        expected = os.path.join(LOCAL_PREFIX, "2025", "01", "photo.jpg")
 
         result = immich_client.reverse_path_mapping(immich_path)
         assert result == expected
@@ -62,8 +71,8 @@ class TestReversePathMapping:
         """Test that path separators are normalized"""
         immich_path = "/data/library/admin/folder/file.jpg"
         result = immich_client.reverse_path_mapping(immich_path)
-        # On Windows, should have backslashes
-        assert "\\" in result or "/" in result
+        # Should contain the OS separator
+        assert os.sep in result
 
 
 class TestGetAssetIdFromPath:
@@ -83,7 +92,8 @@ class TestGetAssetIdFromPath:
         }
         mock_post.return_value = mock_response
 
-        result = immich_client.get_asset_id_from_path(r"E:\library\library\admin\photo.jpg")
+        local_path = os.path.join(LOCAL_PREFIX, "photo.jpg")
+        result = immich_client.get_asset_id_from_path(local_path)
         assert result == 'asset-123'
 
     @patch('src.immich_client.requests.post')
@@ -94,7 +104,8 @@ class TestGetAssetIdFromPath:
         mock_response.json.return_value = {'assets': {'items': []}}
         mock_post.return_value = mock_response
 
-        result = immich_client.get_asset_id_from_path(r"E:\library\library\admin\photo.jpg")
+        local_path = os.path.join(LOCAL_PREFIX, "photo.jpg")
+        result = immich_client.get_asset_id_from_path(local_path)
         assert result is None
 
     @patch('src.immich_client.requests.post')
@@ -102,7 +113,8 @@ class TestGetAssetIdFromPath:
         """Test handling of request errors"""
         mock_post.side_effect = Exception("Network error")
 
-        result = immich_client.get_asset_id_from_path(r"E:\library\library\admin\photo.jpg")
+        local_path = os.path.join(LOCAL_PREFIX, "photo.jpg")
+        result = immich_client.get_asset_id_from_path(local_path)
         assert result is None
 
 
