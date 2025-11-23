@@ -74,19 +74,19 @@ class DatabaseManager:
 
         # Create indexes
         cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_file_path 
+            CREATE INDEX IF NOT EXISTS idx_file_path
             ON classification_results(file_path)
         """)
         cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_file_hash 
+            CREATE INDEX IF NOT EXISTS idx_file_hash
             ON classification_results(file_hash)
         """)
         cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_classified_at 
+            CREATE INDEX IF NOT EXISTS idx_classified_at
             ON classification_results(classified_at)
         """)
         cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_is_watercolor 
+            CREATE INDEX IF NOT EXISTS idx_is_watercolor
             ON classification_results(is_watercolor)
         """)
 
@@ -147,9 +147,9 @@ class DatabaseManager:
         # Check by path first
         cursor = self.conn.cursor()
         cursor.execute("""
-            SELECT * FROM classification_results 
-            WHERE file_path = ? 
-            ORDER BY classified_at DESC 
+            SELECT * FROM classification_results
+            WHERE file_path = ?
+            ORDER BY classified_at DESC
             LIMIT 1
         """, (normalized_path,))
 
@@ -166,18 +166,20 @@ class DatabaseManager:
 
         # Check if file was moved (search by hash)
         cursor.execute("""
-            SELECT * FROM classification_results 
-            WHERE file_hash = ? 
-            ORDER BY classified_at DESC 
+            SELECT * FROM classification_results
+            WHERE file_hash = ?
+            ORDER BY classified_at DESC
             LIMIT 1
         """, (current_hash,))
-
+        
         moved_row = cursor.fetchone()
 
         if moved_row:
             # File was moved, update location
             self.update_moved_location(moved_row['file_path'], normalized_path)
-            return False, dict(moved_row)
+            result = dict(moved_row)
+            result['file_path'] = normalized_path
+            return False, result
 
         # New file, needs processing
         return True, None
@@ -201,7 +203,7 @@ class DatabaseManager:
 
         # Check if entry exists
         cursor.execute("""
-            SELECT id FROM classification_results 
+            SELECT id FROM classification_results
             WHERE file_path = ? AND file_hash = ?
         """, (normalized_path, file_hash))
 
@@ -326,35 +328,35 @@ class DatabaseManager:
 
         # Watercolor count
         cursor.execute("""
-            SELECT COUNT(*) as count FROM classification_results 
+            SELECT COUNT(*) as count FROM classification_results
             WHERE is_watercolor = 1
         """)
         stats['watercolor_count'] = cursor.fetchone()['count']
 
         # Image count
         cursor.execute("""
-            SELECT COUNT(*) as count FROM classification_results 
+            SELECT COUNT(*) as count FROM classification_results
             WHERE file_type = 'image'
         """)
         stats['image_count'] = cursor.fetchone()['count']
 
         # Video count
         cursor.execute("""
-            SELECT COUNT(*) as count FROM classification_results 
+            SELECT COUNT(*) as count FROM classification_results
             WHERE file_type = 'video'
         """)
         stats['video_count'] = cursor.fetchone()['count']
 
         # Moved files count
         cursor.execute("""
-            SELECT COUNT(*) as count FROM classification_results 
+            SELECT COUNT(*) as count FROM classification_results
             WHERE moved_to IS NOT NULL
         """)
         stats['moved_files_count'] = cursor.fetchone()['count']
 
         # Immich tagged count
         cursor.execute("""
-            SELECT COUNT(*) as count FROM classification_results 
+            SELECT COUNT(*) as count FROM classification_results
             WHERE immich_tagged = 1
         """)
         stats['immich_tagged_count'] = cursor.fetchone()['count']
