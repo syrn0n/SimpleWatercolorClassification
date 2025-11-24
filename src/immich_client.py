@@ -113,7 +113,7 @@ class ImmichClient:
                 response = requests.get(
                     f"{self.url}/api/tags",
                     headers=self.headers,
-                    params={"page": page, "limit": 1000}
+                    params={"page": page, "size": 1000}
                 )
                 
                 if response.status_code != 200:
@@ -186,7 +186,7 @@ class ImmichClient:
                     json={
                         "tagIds": [tag_id],
                         "page": page,
-                        "limit": 1000
+                        "size": 1000
                     },
                     headers=self.headers
                 )

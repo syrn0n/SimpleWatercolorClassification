@@ -139,7 +139,7 @@ class TestCreateTagIfNotExists:
         mock_get.assert_called_with(
             f"{immich_client.url}/api/tags",
             headers=immich_client.headers,
-            params={"page": 1, "limit": 1000}
+            params={"page": 1, "size": 1000}
         )
 
     @patch('src.immich_client.requests.post')
@@ -217,7 +217,7 @@ class TestGetAssetsByTag:
         # Verify pagination params
         mock_post.assert_called_with(
             f"{immich_client.url}/api/search/metadata",
-            json={"tagIds": ['tag-123'], "page": 1, "limit": 1000},
+            json={"tagIds": ['tag-123'], "page": 1, "size": 1000},
             headers=immich_client.headers
         )
 
@@ -248,12 +248,12 @@ class TestGetAssetsByTag:
         # Check calls
         mock_post.assert_any_call(
             f"{immich_client.url}/api/search/metadata",
-            json={"tagIds": ['tag-123'], "page": 1, "limit": 1000},
+            json={"tagIds": ['tag-123'], "page": 1, "size": 1000},
             headers=immich_client.headers
         )
         mock_post.assert_any_call(
             f"{immich_client.url}/api/search/metadata",
-            json={"tagIds": ['tag-123'], "page": 2, "limit": 1000},
+            json={"tagIds": ['tag-123'], "page": 2, "size": 1000},
             headers=immich_client.headers
         )
 
