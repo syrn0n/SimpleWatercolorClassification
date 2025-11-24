@@ -139,7 +139,7 @@ class TestCreateTagIfNotExists:
         mock_get.assert_called_with(
             f"{immich_client.url}/api/tags",
             headers=immich_client.headers,
-            params={"page": 1, "size": 1000}
+            params={"page": 1, "size": ImmichClient.PAGE_SIZE}
         )
 
     @patch('src.immich_client.requests.post')
@@ -217,7 +217,7 @@ class TestGetAssetsByTag:
         # Verify pagination params
         mock_post.assert_called_with(
             f"{immich_client.url}/api/search/metadata",
-            json={"tagIds": ['tag-123'], "page": 1, "size": 1000},
+            json={"tagIds": ['tag-123'], "page": 1, "size": ImmichClient.PAGE_SIZE},
             headers=immich_client.headers
         )
 
@@ -225,13 +225,13 @@ class TestGetAssetsByTag:
     def test_get_assets_pagination(self, mock_post, immich_client):
         """Test pagination for assets"""
         # Page 1 response (full page, implying more pages might exist)
-        page1_items = [{'id': f'asset-{i}', 'originalPath': f'/path{i}'} for i in range(1000)]
+        page1_items = [{'id': f'asset-{i}', 'originalPath': f'/path{i}'} for i in range(ImmichClient.PAGE_SIZE)]
         response1 = Mock()
         response1.status_code = 200
         response1.json.return_value = {'assets': {'items': page1_items}}
         
         # Page 2 response (partial page, end of list)
-        page2_items = [{'id': 'asset-1001', 'originalPath': '/path1001'}]
+        page2_items = [{'id': f'asset-{ImmichClient.PAGE_SIZE+1}', 'originalPath': f'/path{ImmichClient.PAGE_SIZE+1}'}]
         response2 = Mock()
         response2.status_code = 200
         response2.json.return_value = {'assets': {'items': page2_items}}
@@ -240,20 +240,20 @@ class TestGetAssetsByTag:
 
         result = immich_client.get_assets_by_tag('tag-123')
         
-        assert len(result) == 1001
+        assert len(result) == ImmichClient.PAGE_SIZE + 1
         assert result[0]['id'] == 'asset-0'
-        assert result[-1]['id'] == 'asset-1001'
+        assert result[-1]['id'] == f'asset-{ImmichClient.PAGE_SIZE+1}'
         
         assert mock_post.call_count == 2
         # Check calls
         mock_post.assert_any_call(
             f"{immich_client.url}/api/search/metadata",
-            json={"tagIds": ['tag-123'], "page": 1, "size": 1000},
+            json={"tagIds": ['tag-123'], "page": 1, "size": ImmichClient.PAGE_SIZE},
             headers=immich_client.headers
         )
         mock_post.assert_any_call(
             f"{immich_client.url}/api/search/metadata",
-            json={"tagIds": ['tag-123'], "page": 2, "size": 1000},
+            json={"tagIds": ['tag-123'], "page": 2, "size": ImmichClient.PAGE_SIZE},
             headers=immich_client.headers
         )
 
