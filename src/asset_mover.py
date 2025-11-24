@@ -158,6 +158,10 @@ class AssetMover:
 
         # Get all assets with this tag
         assets = self.immich_client.get_assets_by_tag(tag_id)
+        
+        # Sort assets alphabetically by originalPath to ensure deterministic order
+        assets.sort(key=lambda x: x.get('originalPath', ''))
+        
         results["total"] = len(assets)
 
         if not assets:

@@ -344,3 +344,37 @@ class TestProcessTaggedAssets:
             assert results['deleted'] == 1  # Simulated
             assert os.path.exists(source)  # Source still exists
             mock_immich_client.delete_asset.assert_not_called()
+
+    def test_process_tagged_assets_sorting(self, asset_mover, mock_immich_client):
+        """Test that assets are processed in alphabetical order"""
+        mock_immich_client.create_tag_if_not_exists.return_value = 'tag-123'
+        
+        # Return assets in random order
+        mock_immich_client.get_assets_by_tag.return_value = [
+            {'id': 'asset-2', 'originalPath': '/b.jpg'},
+            {'id': 'asset-1', 'originalPath': '/a.jpg'},
+            {'id': 'asset-3', 'originalPath': '/c.jpg'}
+        ]
+        
+        # Mock reverse mapping to return valid paths so processing continues
+        mock_immich_client.reverse_path_mapping.side_effect = lambda x: f"E:{x.replace('/', os.sep)}"
+        
+        # Mock calculate_destination_path
+        with pytest.MonkeyPatch.context() as m:
+            m.setattr(asset_mover, 'calculate_destination_path', lambda x: f"D:{x.replace('/', os.sep)}")
+            m.setattr(asset_mover, 'move_file', lambda x, y: True)
+            m.setattr(asset_mover, 'calculate_file_hash', lambda x: 'hash')
+            
+            # We want to verify the order of processing.
+            # We can inspect the calls to delete_asset, which happens after move.
+            mock_immich_client.delete_asset.return_value = True
+            
+            asset_mover.process_tagged_assets('TestTag')
+            
+            # Verify delete_asset was called in the order of sorted original paths: a.jpg (asset-1), b.jpg (asset-2), c.jpg (asset-3)
+            assert mock_immich_client.delete_asset.call_count == 3
+            
+            calls = mock_immich_client.delete_asset.call_args_list
+            assert calls[0][0][0] == 'asset-1'
+            assert calls[1][0][0] == 'asset-2'
+            assert calls[2][0][0] == 'asset-3'
