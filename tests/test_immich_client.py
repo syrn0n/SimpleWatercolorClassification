@@ -36,7 +36,8 @@ class TestImmichClientInit:
         client = ImmichClient("http://test", "key", mappings)
         assert client.url == "http://test"
         assert client.api_key == "key"
-        assert client.path_mappings == mappings
+        expected_mappings = {os.path.normpath(k): v for k, v in mappings.items()}
+        assert client.path_mappings == expected_mappings
 
     def test_init_without_path_mappings(self):
         """Test initialization without path mappings"""
@@ -134,6 +135,12 @@ class TestCreateTagIfNotExists:
 
         result = immich_client.create_tag_if_not_exists('Watercolor')
         assert result == 'tag-123'
+        # Verify pagination params were used
+        mock_get.assert_called_with(
+            f"{immich_client.url}/api/tags",
+            headers=immich_client.headers,
+            params={"page": 1, "limit": 1000}
+        )
 
     @patch('src.immich_client.requests.post')
     @patch('src.immich_client.requests.get')
@@ -206,6 +213,49 @@ class TestGetAssetsByTag:
         result = immich_client.get_assets_by_tag('tag-123')
         assert len(result) == 2
         assert result[0]['id'] == 'asset-1'
+        
+        # Verify pagination params
+        mock_post.assert_called_with(
+            f"{immich_client.url}/api/search/metadata",
+            json={"tagIds": ['tag-123'], "page": 1, "limit": 1000},
+            headers=immich_client.headers
+        )
+
+    @patch('src.immich_client.requests.post')
+    def test_get_assets_pagination(self, mock_post, immich_client):
+        """Test pagination for assets"""
+        # Page 1 response (full page, implying more pages might exist)
+        page1_items = [{'id': f'asset-{i}', 'originalPath': f'/path{i}'} for i in range(1000)]
+        response1 = Mock()
+        response1.status_code = 200
+        response1.json.return_value = {'assets': {'items': page1_items}}
+        
+        # Page 2 response (partial page, end of list)
+        page2_items = [{'id': 'asset-1001', 'originalPath': '/path1001'}]
+        response2 = Mock()
+        response2.status_code = 200
+        response2.json.return_value = {'assets': {'items': page2_items}}
+        
+        mock_post.side_effect = [response1, response2]
+
+        result = immich_client.get_assets_by_tag('tag-123')
+        
+        assert len(result) == 1001
+        assert result[0]['id'] == 'asset-0'
+        assert result[-1]['id'] == 'asset-1001'
+        
+        assert mock_post.call_count == 2
+        # Check calls
+        mock_post.assert_any_call(
+            f"{immich_client.url}/api/search/metadata",
+            json={"tagIds": ['tag-123'], "page": 1, "limit": 1000},
+            headers=immich_client.headers
+        )
+        mock_post.assert_any_call(
+            f"{immich_client.url}/api/search/metadata",
+            json={"tagIds": ['tag-123'], "page": 2, "limit": 1000},
+            headers=immich_client.headers
+        )
 
     @patch('src.immich_client.requests.post')
     def test_get_assets_empty(self, mock_post, immich_client):

@@ -107,12 +107,35 @@ class ImmichClient:
         """
         try:
             # First, list tags to see if it exists
-            response = requests.get(f"{self.url}/api/tags", headers=self.headers)
-            if response.status_code == 200:
+            # First, list tags to see if it exists
+            page = 1
+            while True:
+                response = requests.get(
+                    f"{self.url}/api/tags",
+                    headers=self.headers,
+                    params={"page": page, "limit": 1000}
+                )
+                
+                if response.status_code != 200:
+                    break
+                    
                 tags = response.json()
+                # Handle potential different response formats (list vs dict with items)
+                if isinstance(tags, dict) and 'items' in tags:
+                    tags = tags['items']
+                
+                if not tags:
+                    break
+                    
                 for tag in tags:
                     if tag['name'] == tag_name:
                         return tag['id']
+                
+                # If we got fewer items than limit, we're done
+                if len(tags) < 1000:
+                    break
+                    
+                page += 1
 
             # Create it
             response = requests.post(
@@ -153,18 +176,39 @@ class ImmichClient:
         """
         try:
             # Use search/metadata endpoint with tag filter
-            response = requests.post(
-                f"{self.url}/api/search/metadata",
-                json={"tagIds": [tag_id]},
-                headers=self.headers
-            )
-            if response.status_code == 200:
-                results = response.json()
-                assets = results.get('assets', {}).get('items', [])
-                return assets
-            else:
-                print(f"Failed to get assets for tag {tag_id}: {response.text}")
-                return []
+            # Use search/metadata endpoint with tag filter and pagination
+            all_assets = []
+            page = 1
+            
+            while True:
+                response = requests.post(
+                    f"{self.url}/api/search/metadata",
+                    json={
+                        "tagIds": [tag_id],
+                        "page": page,
+                        "limit": 1000
+                    },
+                    headers=self.headers
+                )
+                
+                if response.status_code == 200:
+                    results = response.json()
+                    assets = results.get('assets', {}).get('items', [])
+                    
+                    if not assets:
+                        break
+                        
+                    all_assets.extend(assets)
+                    
+                    if len(assets) < 1000:
+                        break
+                        
+                    page += 1
+                else:
+                    print(f"Failed to get assets for tag {tag_id} (page {page}): {response.text}")
+                    break
+                    
+            return all_assets
         except Exception as e:
             print(f"Error getting assets for tag {tag_id}: {e}")
             return []
