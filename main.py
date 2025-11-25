@@ -30,8 +30,8 @@ def parse_arguments(default_csv, default_log, vals):
     parser.add_argument("--immich-url", default=os.getenv("IMMICH_URL"),
                         help="Immich Server URL (e.g., http://192.168.1.100:2283)")
     parser.add_argument("--immich-key", default=os.getenv("IMMICH_API_KEY"), help="Immich API Key")
-    parser.add_argument("--immich-tag", default=os.getenv("IMMICH_TAG", "Watercolor"),
-                        help="Tag name to apply in Immich (default: Watercolor)")
+    parser.add_argument("--immich-tag", default=os.getenv("IMMICH_TAG", "Watercolor85"),
+                        help="Tag name to apply in Immich (default: Watercolor85)")
     parser.add_argument("--immich-path-mapping", default=vals.get("IMMICH_PATH_MAPPING"),
                         help="Path mappings in format 'local:remote;local2:remote2' "
                              "(e.g., '/mnt/photos:/usr/src/app/photos')")
@@ -53,6 +53,8 @@ def parse_arguments(default_csv, default_log, vals):
     parser.add_argument("--force-reprocess", action="store_true", help="Force reprocessing of files even if cached")
     parser.add_argument("--clear-cache", action="store_true", help="Clear the classification cache")
     parser.add_argument("--cache-stats", action="store_true", help="Show cache statistics")
+    parser.add_argument("--sync-labels-from-db", action="store_true",
+                        help="Sync granular labels from database cache to Immich")
 
     return parser.parse_args()
 
@@ -181,6 +183,31 @@ def handle_move_operation(args, vals):
     sys.exit(0)
 
 
+def handle_sync_labels_from_db(args, vals):
+    """Handle the sync-labels-from-db operation."""
+    if not args.immich_url or not args.immich_key:
+        print("Error: Immich URL and API key are required for sync operation")
+        sys.exit(1)
+
+    path_mappings = parse_path_mappings_string(args.immich_path_mapping)
+
+    # Initialize classifier and batch processor
+    use_cache = not args.no_cache
+    classifier = WatercolorClassifier(db_path=args.db_path, use_cache=use_cache)
+    video_processor = VideoProcessor(classifier, db_path=args.db_path, use_cache=use_cache)
+    batch_processor = BatchProcessor(classifier, video_processor)
+
+    print("\nSyncing granular labels from database to Immich...")
+    batch_processor.process_from_db(
+        args.immich_url,
+        args.immich_key,
+        path_mappings
+    )
+
+    # Exit after sync operation
+    sys.exit(0)
+
+
 def process_single_file(args, classifier, video_processor):
     """Process a single file (image or video)."""
     ext = os.path.splitext(args.path)[1].lower()
@@ -266,6 +293,10 @@ def main():
     # Handle move-tagged-assets mode
     if args.move_tagged_assets:
         handle_move_operation(args, vals)
+
+    # Handle sync-labels-from-db mode
+    if args.sync_labels_from_db:
+        handle_sync_labels_from_db(args, vals)
 
     # Continue with normal classification flow
     if not os.path.exists(args.path):

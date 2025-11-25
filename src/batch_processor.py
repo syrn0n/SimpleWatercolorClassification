@@ -14,6 +14,27 @@ class BatchProcessor:
         self.image_exts = {'.jpg', '.jpeg', '.png', '.bmp', '.webp', '.tiff'}
         self.video_exts = {'.mp4', '.avi', '.mov', '.mkv'}
 
+    @staticmethod
+    def get_granular_tag(confidence: float) -> Optional[str]:
+        """
+        Get granular tag based on confidence score.
+        
+        Args:
+            confidence: Confidence score (0.0-1.0)
+            
+        Returns:
+            Tag name or None if below threshold
+        """
+        if confidence >= 0.85:
+            return "Watercolor85"
+        elif confidence >= 0.75:
+            return "Watercolor75"
+        elif confidence >= 0.65:
+            return "Watercolor65"
+        elif confidence >= 0.55:
+            return "Watercolor55"
+        return None
+
     def process_folder(self, folder_path: str, output_csv: str, min_frames: int = 3,
                        detection_threshold: float = 0.3, strict_mode: bool = False,
                        image_threshold: float = 0.85,
@@ -134,15 +155,97 @@ class BatchProcessor:
         }
 
     def _tag_asset_if_needed(self, immich_client, tag_id, file_path, result_data):
-        """Tag the asset in Immich if it is a watercolor."""
-        if immich_client and tag_id and result_data['is_watercolor']:
-            asset_id = immich_client.get_asset_id_from_path(file_path)
-            if asset_id:
-                success = immich_client.add_tag_to_asset(asset_id, tag_id)
-                if success:
-                    print(f"Tagged {os.path.basename(file_path)} in Immich.")
+        """Tag the asset in Immich with granular tag based on confidence."""
+        if not immich_client:
+            return
+            
+        confidence = result_data.get('confidence', 0.0)
+        granular_tag_name = self.get_granular_tag(confidence)
+        
+        if not granular_tag_name:
+            return
+            
+        # Create/get the granular tag
+        granular_tag_id = immich_client.create_tag_if_not_exists(granular_tag_name)
+        if not granular_tag_id:
+            print(f"Failed to create/get tag '{granular_tag_name}'")
+            return
+            
+        asset_id = immich_client.get_asset_id_from_path(file_path)
+        if asset_id:
+            success = immich_client.add_tag_to_asset(asset_id, granular_tag_id)
+            if success:
+                print(f"Tagged {os.path.basename(file_path)} with {granular_tag_name}.")
+            else:
+                print(f"Failed to tag {os.path.basename(file_path)} with {granular_tag_name}.")
+
+    def process_from_db(self, immich_url: str, immich_api_key: str, 
+                       immich_path_mappings: Dict[str, str] = None):
+        """
+        Process all cached results from database and apply granular tags to Immich.
+        
+        Args:
+            immich_url: Immich server URL
+            immich_api_key: Immich API key
+            immich_path_mappings: Path mappings for local to remote paths
+        """
+        if not immich_url or not immich_api_key:
+            print("Error: Immich URL and API key are required")
+            return
+            
+        # Initialize Immich client
+        immich_client = ImmichClient(immich_url, immich_api_key, immich_path_mappings)
+        
+        # Get database instance
+        db = self.classifier.db or self.video_processor.db
+        if not db:
+            print("Error: No database available")
+            return
+            
+        print("Processing cached results from database...")
+        
+        tagged_count = 0
+        skipped_count = 0
+        error_count = 0
+        
+        for result in db.get_all_results():
+            file_path = result.get('file_path')
+            confidence = result.get('confidence', 0.0)
+            
+            granular_tag_name = self.get_granular_tag(confidence)
+            
+            if not granular_tag_name:
+                skipped_count += 1
+                continue
+                
+            try:
+                # Create/get the granular tag
+                granular_tag_id = immich_client.create_tag_if_not_exists(granular_tag_name)
+                if not granular_tag_id:
+                    print(f"Failed to create/get tag '{granular_tag_name}'")
+                    error_count += 1
+                    continue
+                    
+                asset_id = immich_client.get_asset_id_from_path(file_path)
+                if asset_id:
+                    success = immich_client.add_tag_to_asset(asset_id, granular_tag_id)
+                    if success:
+                        print(f"Tagged {os.path.basename(file_path)} with {granular_tag_name}")
+                        tagged_count += 1
+                    else:
+                        print(f"Failed to tag {os.path.basename(file_path)}")
+                        error_count += 1
                 else:
-                    print(f"Failed to tag {os.path.basename(file_path)} in Immich.")
+                    skipped_count += 1
+                    
+            except Exception as e:
+                print(f"Error processing {file_path}: {e}")
+                error_count += 1
+                
+        print(f"\n=== Summary ===")
+        print(f"Tagged: {tagged_count}")
+        print(f"Skipped: {skipped_count}")
+        print(f"Errors: {error_count}")
 
     def _create_error_result(self, file_path):
         """Create a result dictionary for an error case."""

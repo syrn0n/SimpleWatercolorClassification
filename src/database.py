@@ -369,6 +369,22 @@ class DatabaseManager:
         cursor.execute("DELETE FROM classification_results")
         self.conn.commit()
 
+    def get_all_results(self):
+        """
+        Get all classification results from the database.
+        
+        Yields:
+            Dictionary containing classification result data
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT * FROM classification_results
+            ORDER BY classified_at DESC
+        """)
+        
+        for row in cursor:
+            yield dict(row)
+
     def close(self):
         """Close database connection."""
         if self.conn:
