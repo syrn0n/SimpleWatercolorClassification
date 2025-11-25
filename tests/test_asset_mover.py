@@ -134,16 +134,18 @@ class TestMoveFile:
             # Define destination
             dest_path = os.path.join(temp_dir, "dest", "source.txt")
             
-            result = asset_mover.move_file(source_path, dest_path)
+            result, error = asset_mover.move_file(source_path, dest_path)
             
             assert result is True
+            assert error is None
             assert os.path.exists(dest_path)
             assert not os.path.exists(source_path)
     
     def test_move_file_source_not_exists(self, asset_mover):
         """Test moving nonexistent source file"""
-        result = asset_mover.move_file("nonexistent.txt", "dest.txt")
+        result, error = asset_mover.move_file("nonexistent.txt", "dest.txt")
         assert result is False
+        assert "Source file not found" in error
     
     def test_move_file_destination_exists_same_hash(self, asset_mover):
         """Test when destination exists with same content"""
@@ -158,9 +160,10 @@ class TestMoveFile:
             with open(dest_path, 'w') as f:
                 f.write(content)
             
-            result = asset_mover.move_file(source_path, dest_path)
+            result, error = asset_mover.move_file(source_path, dest_path)
             
             assert result is True
+            assert error is None
             assert not os.path.exists(source_path)  # Source should be removed
             assert os.path.exists(dest_path)
     
@@ -175,9 +178,10 @@ class TestMoveFile:
             with open(dest_path, 'w') as f:
                 f.write("different content")
             
-            result = asset_mover.move_file(source_path, dest_path)
+            result, error = asset_mover.move_file(source_path, dest_path)
             
             assert result is False
+            assert "Different file already exists" in error
             assert os.path.exists(source_path)  # Source should still exist
     
     def test_move_file_dry_run(self, asset_mover_dry_run):
@@ -189,9 +193,10 @@ class TestMoveFile:
             
             dest_path = os.path.join(temp_dir, "dest.txt")
             
-            result = asset_mover_dry_run.move_file(source_path, dest_path)
+            result, error = asset_mover_dry_run.move_file(source_path, dest_path)
             
             assert result is True
+            assert error is None
             assert os.path.exists(source_path)  # Source should still exist in dry-run
             assert not os.path.exists(dest_path)  # Destination should not be created
 
@@ -362,7 +367,7 @@ class TestProcessTaggedAssets:
         # Mock calculate_destination_path
         with pytest.MonkeyPatch.context() as m:
             m.setattr(asset_mover, 'calculate_destination_path', lambda x: f"D:{x.replace('/', os.sep)}")
-            m.setattr(asset_mover, 'move_file', lambda x, y: True)
+            m.setattr(asset_mover, 'move_file', lambda x, y: (True, None))
             m.setattr(asset_mover, 'calculate_file_hash', lambda x: 'hash')
             
             # We want to verify the order of processing.

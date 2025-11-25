@@ -53,6 +53,26 @@ class BatchProcessor:
             print("No supported files found.")
             return
 
+        # Check cache statistics
+        # db = self.classifier.db or self.video_processor.db
+        # if db:
+        #     cached_count = 0
+        #     needs_processing_count = 0
+            
+        #     for file_path in files_to_process:
+        #         if os.path.exists(file_path):
+        #             needs_processing, cached_result = db.check_if_processed(file_path)
+        #             if needs_processing:
+        #                 needs_processing_count += 1
+        #             else:
+        #                 cached_count += 1
+            
+        #     print(f"\n=== Processing Statistics ===")
+        #     print(f"Total files found: {len(files_to_process)}")
+        #     print(f"Files in cache: {cached_count}")
+        #     print(f"Files needing processing: {needs_processing_count}")
+        #     print(f"=============================\n")
+
         results = []
 
         # Use tqdm for a progress bar

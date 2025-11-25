@@ -63,7 +63,7 @@ class AssetMover:
 
         return None
 
-    def move_file(self, source_path: str, dest_path: str) -> bool:
+    def move_file(self, source_path: str, dest_path: str) -> tuple[bool, Optional[str]]:
         """
         Move file from source to destination.
 
@@ -72,20 +72,23 @@ class AssetMover:
             dest_path: Local destination file path
 
         Returns:
-            True if move succeeded, False otherwise
+            Tuple of (success, error_message)
         """
         try:
             # Check if source file exists
             if not os.path.exists(source_path):
-                return False
+                return False, f"Source file not found: {source_path}"
 
             if self.dry_run:
                 # In dry-run mode, just simulate success
-                return True
+                return True, None
 
             # Create destination directory if needed
             dest_dir = os.path.dirname(dest_path)
-            os.makedirs(dest_dir, exist_ok=True)
+            try:
+                os.makedirs(dest_dir, exist_ok=True)
+            except Exception as e:
+                return False, f"Failed to create destination directory: {str(e)}"
 
             # Check if destination already exists
             if os.path.exists(dest_path):
@@ -95,18 +98,24 @@ class AssetMover:
 
                 if source_hash and dest_hash and source_hash == dest_hash:
                     # Files are identical, just remove source
-                    os.remove(source_path)
-                    return True
+                    try:
+                        os.remove(source_path)
+                        return True, None
+                    except Exception as e:
+                        return False, f"Failed to remove duplicate source file: {str(e)}"
                 else:
                     # Different files at destination
-                    return False
+                    return False, f"Different file already exists at destination: {dest_path}"
 
             # Move the file
-            shutil.move(source_path, dest_path)
-            return True
+            try:
+                shutil.move(source_path, dest_path)
+                return True, None
+            except Exception as e:
+                return False, f"Failed to move file: {str(e)}"
 
-        except Exception:
-            return False
+        except Exception as e:
+            return False, f"Unexpected error: {str(e)}"
 
     def save_transaction_log(self, filename: str):
         """
@@ -224,7 +233,7 @@ class AssetMover:
             return
 
         # Attempt to move file
-        move_success = self.move_file(source_path, dest_path)
+        move_success, move_error = self.move_file(source_path, dest_path)
         transaction['move_success'] = move_success
 
         if move_success:
@@ -237,11 +246,13 @@ class AssetMover:
 
                 if delete_success:
                     results["deleted"] += 1
+                else:
+                    transaction['error'] = 'Failed to delete from Immich'
             else:
                 transaction['delete_success'] = True  # Would delete in real run
                 results["deleted"] += 1
         else:
-            transaction['error'] = 'Move failed'
+            transaction['error'] = move_error or 'Move failed'
             results["failed"] += 1
 
         self.transaction_log.append(transaction)
