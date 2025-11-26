@@ -183,21 +183,37 @@ class BatchProcessor:
         granular_tag_name = self.get_granular_tag(confidence)
         
         if not granular_tag_name:
-            return
+            # Even if no granular tag, we might still want to add "Painting" tag
+            pass
             
         # Create/get the granular tag
-        granular_tag_id = immich_client.create_tag_if_not_exists(granular_tag_name)
-        if not granular_tag_id:
-            print(f"Failed to create/get tag '{granular_tag_name}'")
-            return
-            
-        asset_id = immich_client.get_asset_id_from_path(file_path)
-        if asset_id:
-            success = immich_client.add_tag_to_asset(asset_id, granular_tag_id)
-            if success:
-                print(f"Tagged {os.path.basename(file_path)} with {granular_tag_name}.")
+        if granular_tag_name:
+            granular_tag_id = immich_client.create_tag_if_not_exists(granular_tag_name)
+            if not granular_tag_id:
+                print(f"Failed to create/get tag '{granular_tag_name}'")
             else:
-                print(f"Failed to tag {os.path.basename(file_path)} with {granular_tag_name}.")
+                asset_id = immich_client.get_asset_id_from_path(file_path)
+                if asset_id:
+                    success = immich_client.add_tag_to_asset(asset_id, granular_tag_id)
+                    if success:
+                        print(f"Tagged {os.path.basename(file_path)} with {granular_tag_name}.")
+                    else:
+                        print(f"Failed to tag {os.path.basename(file_path)} with {granular_tag_name}.")
+
+        # Check for "Painting" tag
+        top_label = result_data.get('top_label')
+        painting_labels = ["a watercolor painting", "an oil painting", "an acrylic painting"]
+        
+        if top_label in painting_labels:
+            painting_tag_id = immich_client.create_tag_if_not_exists("Painting")
+            if painting_tag_id:
+                asset_id = immich_client.get_asset_id_from_path(file_path)
+                if asset_id:
+                    success = immich_client.add_tag_to_asset(asset_id, painting_tag_id)
+                    if success:
+                        print(f"Tagged {os.path.basename(file_path)} with 'Painting'.")
+                    else:
+                        print(f"Failed to tag {os.path.basename(file_path)} with 'Painting'.")
 
     def process_from_db(self, immich_url: str, immich_api_key: str, 
                        immich_path_mappings: Dict[str, str] = None):
@@ -234,29 +250,45 @@ class BatchProcessor:
             
             granular_tag_name = self.get_granular_tag(confidence)
             
-            if not granular_tag_name:
+            if not granular_tag_name and not result.get('top_label'):
                 skipped_count += 1
                 continue
                 
             try:
-                # Create/get the granular tag
-                granular_tag_id = immich_client.create_tag_if_not_exists(granular_tag_name)
-                if not granular_tag_id:
-                    print(f"Failed to create/get tag '{granular_tag_name}'")
-                    error_count += 1
-                    continue
-                    
                 asset_id = immich_client.get_asset_id_from_path(file_path)
-                if asset_id:
-                    success = immich_client.add_tag_to_asset(asset_id, granular_tag_id)
-                    if success:
-                        print(f"Tagged {os.path.basename(file_path)} with {granular_tag_name}")
-                        tagged_count += 1
-                    else:
-                        print(f"Failed to tag {os.path.basename(file_path)}")
-                        error_count += 1
-                else:
+                if not asset_id:
                     skipped_count += 1
+                    continue
+
+                # Apply granular tag
+                if granular_tag_name:
+                    granular_tag_id = immich_client.create_tag_if_not_exists(granular_tag_name)
+                    if granular_tag_id:
+                        success = immich_client.add_tag_to_asset(asset_id, granular_tag_id)
+                        if success:
+                            print(f"Tagged {os.path.basename(file_path)} with {granular_tag_name}")
+                            tagged_count += 1
+                        else:
+                            print(f"Failed to tag {os.path.basename(file_path)}")
+                            error_count += 1
+                    else:
+                        print(f"Failed to create/get tag '{granular_tag_name}'")
+                        error_count += 1
+
+                # Apply "Painting" tag
+                top_label = result.get('top_label')
+                painting_labels = ["a watercolor painting", "an oil painting", "an acrylic painting"]
+                
+                if top_label in painting_labels:
+                    painting_tag_id = immich_client.create_tag_if_not_exists("Painting")
+                    if painting_tag_id:
+                        success = immich_client.add_tag_to_asset(asset_id, painting_tag_id)
+                        if success:
+                            print(f"Tagged {os.path.basename(file_path)} with 'Painting'")
+                            tagged_count += 1
+                        else:
+                            print(f"Failed to tag {os.path.basename(file_path)} with 'Painting'")
+                            error_count += 1
                     
             except Exception as e:
                 print(f"Error processing {file_path}: {e}")
@@ -282,7 +314,8 @@ class BatchProcessor:
             "total_frames": 0,
             "watercolor_frames_count": 0,
             "watercolor_frames_percent": 0.0,
-            "avg_watercolor_confidence": 0.0
+            "avg_watercolor_confidence": 0.0,
+            "top_label": None
         }
 
     def _write_csv(self, results: List[Dict], output_csv: str):
@@ -290,7 +323,7 @@ class BatchProcessor:
             "file_path", "folder", "filename", "type", "is_watercolor", "confidence",
             "duration_seconds", "processed_frames", "planned_frames", "total_frames",
             "watercolor_frames_count", "watercolor_frames_percent",
-            "avg_watercolor_confidence"
+            "avg_watercolor_confidence", "top_label"
         ]
 
         with open(output_csv, 'w', newline='', encoding='utf-8') as csvfile:

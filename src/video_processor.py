@@ -118,7 +118,8 @@ class VideoProcessor:
             "frame_index": current_frame,
             "timestamp": current_frame / fps if fps > 0 else 0,
             "probs": probs,
-            "is_watercolor": is_wc
+            "is_watercolor": is_wc,
+            "top_label": max(probs, key=probs.get)
         }
 
     def _check_early_stopping(self, threshold_frames, processed_count, results, detection_threshold):
@@ -157,6 +158,11 @@ class VideoProcessor:
 
         is_video_watercolor = percent_watercolor_frames >= detection_threshold
 
+        # Determine top label for the video (most frequent top label across frames)
+        from collections import Counter
+        top_labels = [r.get("top_label") for r in results if r.get("top_label")]
+        video_top_label = Counter(top_labels).most_common(1)[0][0] if top_labels else None
+
         return {
             "is_watercolor": is_video_watercolor,
             "confidence": avg_confidence,
@@ -166,7 +172,8 @@ class VideoProcessor:
             "total_video_frames": total_frames,
             "duration_seconds": duration,
             "watercolor_frames_count": watercolor_frames_count,
-            "avg_watercolor_confidence": avg_watercolor_confidence
+            "avg_watercolor_confidence": avg_watercolor_confidence,
+            "top_label": video_top_label
         }
 
     def process_video_with_cache(self, video_path: str, force: bool = False, **kwargs) -> Dict:

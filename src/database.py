@@ -90,6 +90,13 @@ class DatabaseManager:
             ON classification_results(is_watercolor)
         """)
 
+        # Migration: Add top_label column if it doesn't exist
+        try:
+            cursor.execute("ALTER TABLE classification_results ADD COLUMN top_label TEXT")
+        except sqlite3.OperationalError:
+            # Column likely already exists
+            pass
+
         self.conn.commit()
 
     def calculate_file_hash(self, file_path: str) -> str:
@@ -225,6 +232,7 @@ class DatabaseManager:
                     watercolor_frames_count = ?,
                     percent_watercolor_frames = ?,
                     avg_watercolor_confidence = ?,
+                    top_label = ?,
                     classified_at = CURRENT_TIMESTAMP,
                     classification_version = ?
                 WHERE id = ?
@@ -241,6 +249,7 @@ class DatabaseManager:
                 result_data.get('watercolor_frames_count'),
                 result_data.get('percent_watercolor_frames'),
                 result_data.get('avg_watercolor_confidence'),
+                result_data.get('top_label'),
                 self.VERSION,
                 existing['id']
             ))
@@ -252,8 +261,8 @@ class DatabaseManager:
                     file_type, is_watercolor, confidence,
                     duration_seconds, total_frames, processed_frames, planned_frames,
                     watercolor_frames_count, percent_watercolor_frames,
-                    avg_watercolor_confidence, classification_version
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    avg_watercolor_confidence, top_label, classification_version
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 normalized_path,
                 file_hash,
@@ -269,6 +278,7 @@ class DatabaseManager:
                 result_data.get('watercolor_frames_count'),
                 result_data.get('percent_watercolor_frames'),
                 result_data.get('avg_watercolor_confidence'),
+                result_data.get('top_label'),
                 self.VERSION
             ))
 

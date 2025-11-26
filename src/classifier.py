@@ -157,7 +157,8 @@ class WatercolorClassifier:
             'file_path': image_path,
             'file_type': 'image',
             'is_watercolor': is_wc,
-            'confidence': probs.get("a watercolor painting", 0.0)
+            'confidence': probs.get("a watercolor painting", 0.0),
+            'top_label': max(probs, key=probs.get)
         }
         
         # Save to cache

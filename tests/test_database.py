@@ -136,6 +136,22 @@ class TestDatabaseManager(unittest.TestCase):
         self.assertEqual(stats["video_count"], 1)
         self.assertEqual(stats["watercolor_count"], 1)
 
+    def test_top_label_persistence(self):
+        """Test saving and retrieving top_label."""
+        result_data = {
+            "is_watercolor": True,
+            "confidence": 0.95,
+            "top_label": "a watercolor painting",
+            "file_type": "image"
+        }
+        
+        self.db.save_result(self.file1, result_data)
+        
+        needs_processing, cached_result = self.db.check_if_processed(self.file1)
+        self.assertFalse(needs_processing)
+        self.assertIsNotNone(cached_result)
+        self.assertEqual(cached_result["top_label"], "a watercolor painting")
+
 
 if __name__ == '__main__':
     unittest.main()
