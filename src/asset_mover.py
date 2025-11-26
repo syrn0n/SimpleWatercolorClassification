@@ -39,6 +39,22 @@ class AssetMover:
         except Exception:
             return None
 
+    def _get_unique_dest_path(self, dest_path: str) -> str:
+        """
+        Get a unique destination path by appending a counter if the file exists.
+        E.g., file.jpg -> file-1.jpg -> file-2.jpg
+        """
+        if not os.path.exists(dest_path):
+            return dest_path
+
+        base, ext = os.path.splitext(dest_path)
+        counter = 1
+        while True:
+            new_path = f"{base}-{counter}{ext}"
+            if not os.path.exists(new_path):
+                return new_path
+            counter += 1
+
     def calculate_destination_path(self, immich_path: str) -> Optional[str]:
         """
         Calculate destination path for an asset.
@@ -63,7 +79,7 @@ class AssetMover:
 
         return None
 
-    def move_file(self, source_path: str, dest_path: str) -> tuple[bool, Optional[str]]:
+    def move_file(self, source_path: str, dest_path: str) -> tuple[bool, Optional[str], str]:
         """
         Move file from source to destination.
 
@@ -72,23 +88,23 @@ class AssetMover:
             dest_path: Local destination file path
 
         Returns:
-            Tuple of (success, error_message)
+            Tuple of (success, error_message, actual_dest_path)
         """
         try:
             # Check if source file exists
             if not os.path.exists(source_path):
-                return False, f"Source file not found: {source_path}"
+                return False, f"Source file not found: {source_path}", dest_path
 
             if self.dry_run:
                 # In dry-run mode, just simulate success
-                return True, None
+                return True, None, dest_path
 
             # Create destination directory if needed
             dest_dir = os.path.dirname(dest_path)
             try:
                 os.makedirs(dest_dir, exist_ok=True)
             except Exception as e:
-                return False, f"Failed to create destination directory: {str(e)}"
+                return False, f"Failed to create destination directory: {str(e)}", dest_path
 
             # Check if destination already exists
             if os.path.exists(dest_path):
@@ -100,22 +116,22 @@ class AssetMover:
                     # Files are identical, just remove source
                     try:
                         os.remove(source_path)
-                        return True, None
+                        return True, None, dest_path
                     except Exception as e:
-                        return False, f"Failed to remove duplicate source file: {str(e)}"
+                        return False, f"Failed to remove duplicate source file: {str(e)}", dest_path
                 else:
-                    # Different files at destination
-                    return False, f"Different file already exists at destination: {dest_path}"
+                    # Different files at destination - rename
+                    dest_path = self._get_unique_dest_path(dest_path)
 
             # Move the file
             try:
                 shutil.move(source_path, dest_path)
-                return True, None
+                return True, None, dest_path
             except Exception as e:
-                return False, f"Failed to move file: {str(e)}"
+                return False, f"Failed to move file: {str(e)}", dest_path
 
         except Exception as e:
-            return False, f"Unexpected error: {str(e)}"
+            return False, f"Unexpected error: {str(e)}", dest_path
 
     def save_transaction_log(self, filename: str):
         """
@@ -233,8 +249,9 @@ class AssetMover:
             return
 
         # Attempt to move file
-        move_success, move_error = self.move_file(source_path, dest_path)
+        move_success, move_error, actual_dest_path = self.move_file(source_path, dest_path)
         transaction['move_success'] = move_success
+        transaction['dest_path'] = actual_dest_path
 
         if move_success:
             results["moved"] += 1
