@@ -45,7 +45,7 @@ class TestPaintingTag(unittest.TestCase):
         # Setup mock result for an oil painting
         result_data = {
             'file_path': 'test_oil.jpg',
-            'confidence': 0.4, # Low confidence for watercolor, but high for oil (implied by top_label)
+            'confidence': 0.3, # Low confidence for watercolor, but high for oil (implied by top_label)
             'top_label': 'an oil painting'
         }
         

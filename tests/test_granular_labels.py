@@ -30,9 +30,9 @@ class TestGranularLabels:
         assert BatchProcessor.get_granular_tag(0.6499) == "Watercolor55"
 
     def test_get_granular_tag_below_threshold(self):
-        """Test that confidence below 0.55 returns None."""
-        assert BatchProcessor.get_granular_tag(0.54) is None
-        assert BatchProcessor.get_granular_tag(0.50) is None
+        """Test that confidence below 0.35 returns None."""
+        assert BatchProcessor.get_granular_tag(0.34) is None
+        assert BatchProcessor.get_granular_tag(0.30) is None
         assert BatchProcessor.get_granular_tag(0.0) is None
 
     def test_get_granular_tag_boundary_values(self):
@@ -42,9 +42,13 @@ class TestGranularLabels:
         assert BatchProcessor.get_granular_tag(0.75) == "Watercolor75"
         assert BatchProcessor.get_granular_tag(0.65) == "Watercolor65"
         assert BatchProcessor.get_granular_tag(0.55) == "Watercolor55"
+        assert BatchProcessor.get_granular_tag(0.45) == "Watercolor45"
+        assert BatchProcessor.get_granular_tag(0.35) == "Watercolor35"
         
         # Test just below boundaries
         assert BatchProcessor.get_granular_tag(0.8499999) == "Watercolor75"
         assert BatchProcessor.get_granular_tag(0.7499999) == "Watercolor65"
         assert BatchProcessor.get_granular_tag(0.6499999) == "Watercolor55"
-        assert BatchProcessor.get_granular_tag(0.5499999) is None
+        assert BatchProcessor.get_granular_tag(0.5499999) == "Watercolor45"
+        assert BatchProcessor.get_granular_tag(0.4499999) == "Watercolor35"
+        assert BatchProcessor.get_granular_tag(0.3499999) is None
