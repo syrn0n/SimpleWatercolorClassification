@@ -33,6 +33,10 @@ class BatchProcessor:
             return "Watercolor65"
         elif confidence >= 0.55:
             return "Watercolor55"
+        elif confidence >= 0.45:
+            return "Watercolor45"
+        elif confidence >= 0.35:
+            return "Watercolor35"
         return None
 
     def process_folder(self, folder_path: str, output_csv: str, min_frames: int = 3,
