@@ -146,7 +146,7 @@ class BatchProcessor:
             "duration_seconds": vid_result['duration_seconds'],
             "processed_frames": vid_result['processed_frames'],
             "planned_frames": vid_result['planned_frames'],
-            "total_frames": vid_result['total_video_frames'],
+            "total_frames": vid_result['total_frames'],
             "watercolor_frames_count": vid_result['watercolor_frames_count'],
             "watercolor_frames_percent": vid_result['percent_watercolor_frames'],
             "avg_watercolor_confidence": vid_result['avg_watercolor_confidence']
