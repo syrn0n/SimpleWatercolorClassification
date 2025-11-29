@@ -176,13 +176,17 @@ class VideoProcessor:
             "top_label": video_top_label
         }
 
-    def process_video_with_cache(self, video_path: str, force: bool = False, **kwargs) -> Dict:
+    def process_video_with_cache(self, video_path: str, force: bool = False, quick_sync: bool = False, **kwargs) -> Dict:
         """
         Process video with database caching.
         """
         # Check cache if enabled
         if self.db and not force:
-            needs_processing, cached = self.db.check_if_processed(video_path)
+            if quick_sync:
+                needs_processing, cached = self.db.check_if_processed_quick(video_path)
+            else:
+                needs_processing, cached = self.db.check_if_processed(video_path)
+            
             if not needs_processing:
                 return cached
 

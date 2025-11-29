@@ -1,5 +1,6 @@
 import torch
-from PIL import Image
+from PIL import Image, ImageFile
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 from transformers import CLIPProcessor, CLIPModel
 from typing import Union, Dict, Optional
 from .database import DatabaseManager
@@ -120,7 +121,8 @@ class WatercolorClassifier:
         return True
 
     def classify_with_cache(self, image_path: str, threshold: float = 0.85,
-                           strict_mode: bool = False, force: bool = False) -> Dict:
+                           strict_mode: bool = False, force: bool = False,
+                           quick_sync: bool = False) -> Dict:
         """
         Classify image with database caching.
         """
@@ -141,7 +143,11 @@ class WatercolorClassifier:
 
         # Check cache if enabled
         if self.db and not force:
-            needs_processing, cached = self.db.check_if_processed(image_path)
+            if quick_sync:
+                needs_processing, cached = self.db.check_if_processed_quick(image_path)
+            else:
+                needs_processing, cached = self.db.check_if_processed(image_path)
+            
             if not needs_processing:
                 return cached
         

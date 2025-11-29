@@ -39,12 +39,12 @@ class BatchProcessor:
             return "Watercolor35"
         return None
 
-    def process_folder(self, folder_path: str, output_csv: str, min_frames: int = 3,
+    def process_folder(self, folder_path: str, min_frames: int = 3,
                        detection_threshold: float = 0.3, strict_mode: bool = False,
                        image_threshold: float = 0.85,
                        immich_url: str = None, immich_api_key: str = None, immich_tag: str = "Watercolor",
                        immich_path_mappings: Dict[str, str] = None,
-                       force_reprocess: bool = False):
+                       force_reprocess: bool = False, quick_sync: bool = False):
         """
         Recursively process a folder and write results to a CSV file.
         """
@@ -57,26 +57,6 @@ class BatchProcessor:
             print("No supported files found.")
             return
 
-        # Check cache statistics
-        # db = self.classifier.db or self.video_processor.db
-        # if db:
-        #     cached_count = 0
-        #     needs_processing_count = 0
-            
-        #     for file_path in files_to_process:
-        #         if os.path.exists(file_path):
-        #             needs_processing, cached_result = db.check_if_processed(file_path)
-        #             if needs_processing:
-        #                 needs_processing_count += 1
-        #             else:
-        #                 cached_count += 1
-            
-        #     print(f"\n=== Processing Statistics ===")
-        #     print(f"Total files found: {len(files_to_process)}")
-        #     print(f"Files in cache: {cached_count}")
-        #     print(f"Files needing processing: {needs_processing_count}")
-        #     print(f"=============================\n")
-
         results = []
 
         # Use tqdm for a progress bar
@@ -87,13 +67,28 @@ class BatchProcessor:
             try:
                 if ext in self.video_exts:
                     result_data = self._process_video_file(
-                        file_path, force_reprocess, min_frames, detection_threshold,
-                        strict_mode, image_threshold
+                        file_path, min_frames, detection_threshold, strict_mode, image_threshold,
+                        force=force_reprocess, quick_sync=quick_sync
                     )
                 elif ext in self.image_exts:
-                    result_data = self._process_image_file(
-                        file_path, force_reprocess, image_threshold, strict_mode
+                    result_data = self.classifier.classify_with_cache(
+                        file_path, threshold=image_threshold, strict_mode=strict_mode,
+                        force=force_reprocess, quick_sync=quick_sync
                     )
+                    # Add missing fields for image result to match expected structure
+                    result_data.update({
+                        "file_path": file_path,
+                        "folder": os.path.dirname(file_path),
+                        "filename": os.path.basename(file_path),
+                        "type": "image",
+                        "duration_seconds": 0,
+                        "processed_frames": 1,
+                        "planned_frames": 1,
+                        "total_frames": 1,
+                        "watercolor_frames_count": 1 if result_data['is_watercolor'] else 0,
+                        "watercolor_frames_percent": 1.0 if result_data['is_watercolor'] else 0.0,
+                        "avg_watercolor_confidence": result_data['confidence'] if result_data['is_watercolor'] else 0.0
+                    })
 
                 if result_data:
                     results.append(result_data)
@@ -101,11 +96,15 @@ class BatchProcessor:
 
             except Exception as e:
                 print(f"Error processing {file_path}: {e}")
-                results.append(self._create_error_result(file_path))
+                error_result = self._create_error_result(file_path, str(e))
+                results.append(error_result)
+                
+                # Save error to database
+                if self.classifier.db:
+                    self.classifier.db.save_result(file_path, error_result)
 
-        # Write to CSV
-        self._write_csv(results, output_csv)
-        print(f"\nResults saved to {output_csv}")
+        # Print Summary
+        self._print_summary(results)
 
     def _initialize_immich(self, url, api_key, tag, mappings):
         """Initialize Immich client and tag."""
@@ -130,11 +129,17 @@ class BatchProcessor:
                     files_to_process.append(os.path.join(root, file))
         return files_to_process
 
-    def _process_video_file(self, file_path, force, min_frames, detection_threshold, strict_mode, image_threshold):
+    def _process_video_file(self, file_path: str, min_frames: int, detection_threshold: float,
+                            strict_mode: bool, image_threshold: float, force: bool = False,
+                            quick_sync: bool = False) -> Dict:
         """Process a single video file."""
         vid_result = self.video_processor.process_video_with_cache(
-            file_path, force=force, min_frames=min_frames, detection_threshold=detection_threshold,
-            strict_mode=strict_mode, image_threshold=image_threshold
+            file_path, min_frames=min_frames,
+            detection_threshold=detection_threshold,
+            strict_mode=strict_mode,
+            image_threshold=image_threshold,
+            force=force,
+            quick_sync=quick_sync
         )
         return {
             "file_path": file_path,
@@ -150,32 +155,6 @@ class BatchProcessor:
             "watercolor_frames_count": vid_result['watercolor_frames_count'],
             "watercolor_frames_percent": vid_result['percent_watercolor_frames'],
             "avg_watercolor_confidence": vid_result['avg_watercolor_confidence']
-        }
-
-    def _process_image_file(self, file_path, force, threshold, strict_mode):
-        """Process a single image file."""
-        img_result = self.classifier.classify_with_cache(
-            file_path, threshold=threshold,
-            strict_mode=strict_mode, force=force
-        )
-
-        is_wc = img_result['is_watercolor']
-        wc_prob = img_result['confidence']
-
-        return {
-            "file_path": file_path,
-            "folder": os.path.dirname(file_path),
-            "filename": os.path.basename(file_path),
-            "type": "image",
-            "is_watercolor": is_wc,
-            "confidence": wc_prob,
-            "duration_seconds": 0,
-            "processed_frames": 1,
-            "planned_frames": 1,
-            "total_frames": 1,
-            "watercolor_frames_count": 1 if is_wc else 0,
-            "watercolor_frames_percent": 1.0 if is_wc else 0.0,
-            "avg_watercolor_confidence": wc_prob if is_wc else 0.0
         }
 
     def _tag_asset_if_needed(self, immich_client, tag_id, file_path, result_data):
@@ -303,7 +282,7 @@ class BatchProcessor:
         print(f"Skipped: {skipped_count}")
         print(f"Errors: {error_count}")
 
-    def _create_error_result(self, file_path):
+    def _create_error_result(self, file_path, error_message="Unknown error"):
         """Create a result dictionary for an error case."""
         return {
             "file_path": file_path,
@@ -319,19 +298,25 @@ class BatchProcessor:
             "watercolor_frames_count": 0,
             "watercolor_frames_percent": 0.0,
             "avg_watercolor_confidence": 0.0,
-            "top_label": None
+            "avg_watercolor_confidence": 0.0,
+            "top_label": None,
+            "error": error_message
         }
 
-    def _write_csv(self, results: List[Dict], output_csv: str):
-        fieldnames = [
-            "file_path", "folder", "filename", "type", "is_watercolor", "confidence",
-            "duration_seconds", "processed_frames", "planned_frames", "total_frames",
-            "watercolor_frames_count", "watercolor_frames_percent",
-            "avg_watercolor_confidence", "top_label"
-        ]
-
-        with open(output_csv, 'w', newline='', encoding='utf-8') as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-            writer.writeheader()
-            for row in results:
-                writer.writerow(row)
+    def _print_summary(self, results: List[Dict]):
+        """Print execution summary."""
+        total_files = len(results)
+        images = sum(1 for r in results if r.get('type') == 'image')
+        videos = sum(1 for r in results if r.get('type') == 'video')
+        watercolors = sum(1 for r in results if r.get('is_watercolor'))
+        errors = sum(1 for r in results if r.get('error'))
+        
+        print("\n" + "="*30)
+        print("       EXECUTION SUMMARY")
+        print("="*30)
+        print(f"Total Files Processed: {total_files}")
+        print(f"  - Images: {images}")
+        print(f"  - Videos: {videos}")
+        print(f"Watercolor Detections: {watercolors}")
+        print(f"Errors Encountered:    {errors}")
+        print("="*30 + "\n")

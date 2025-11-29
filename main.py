@@ -11,14 +11,13 @@ from src.immich_client import ImmichClient
 from src.database import DatabaseManager
 
 
-def parse_arguments(default_csv, default_log, vals):
+def parse_arguments(vals):
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(description="Classify images or videos as watercolor paintings.")
     parser.add_argument("path", nargs='?', help="Path to the image, video, or folder")
     parser.add_argument("--threshold", type=float, default=float(os.getenv("WATERCOLOR_THRESHOLD", 0.85)),
                         help="Confidence threshold for classification")
-    parser.add_argument("--output", default=os.getenv("WATERCOLOR_OUTPUT"),
-                        help="Path to output CSV file (optional, defaults to timestamped file)")
+
     parser.add_argument("--min-frames", type=int, default=int(os.getenv("WATERCOLOR_MIN_FRAMES", 3)),
                         help="Minimum number of frames to sample per video (default: 3)")
     parser.add_argument("--detection-threshold", type=float,
@@ -43,14 +42,14 @@ def parse_arguments(default_csv, default_log, vals):
     parser.add_argument("--dry-run", action="store_true",
                         default=vals.get("MOVE_DRY_RUN", "false").lower() == "true",
                         help="Simulate move operation without actually moving files or deleting from Immich")
-    parser.add_argument("--csv-report", default=default_csv, help="Path to save CSV report of move operations")
-    parser.add_argument("--transaction-log", default=default_log, help="Path to save transaction log JSON file")
+
     parser.add_argument("--db-path", default=os.getenv("CLASSIFICATION_DB_PATH", "classification_cache.db"),
                         help="Path to SQLite database for caching results")
     parser.add_argument("--no-cache", action="store_true",
                         default=os.getenv("DISABLE_CACHE", "false").lower() == "true",
                         help="Disable database caching")
     parser.add_argument("--force-reprocess", action="store_true", help="Force reprocessing of files even if cached")
+    parser.add_argument("--quick-sync", action="store_true", help="Quick sync: check file existence in DB by name only (skips hash check)")
     parser.add_argument("--clear-cache", action="store_true", help="Clear the classification cache")
     parser.add_argument("--cache-stats", action="store_true", help="Show cache statistics")
     parser.add_argument("--sync-labels-from-db", action="store_true",
@@ -131,6 +130,10 @@ def parse_path_mappings_string(mapping_string):
     return path_mappings
 
 
+
+
+
+
 def print_move_results(results):
     """Print summary of move operation results."""
     print("\n=== Results ===")
@@ -138,17 +141,6 @@ def print_move_results(results):
     print(f"Successfully moved: {results['moved']}")
     print(f"Failed to move: {results['failed']}")
     print(f"Deleted from Immich: {results['deleted']}")
-
-
-def save_move_reports(args, asset_mover):
-    """Save CSV report and transaction log if requested."""
-    if args.csv_report:
-        asset_mover.save_csv_report(args.csv_report)
-        print(f"\nCSV report saved to: {args.csv_report}")
-
-    if args.transaction_log:
-        asset_mover.save_transaction_log(args.transaction_log)
-        print(f"Transaction log saved to: {args.transaction_log}")
 
 
 def handle_move_operation(args, vals):
@@ -177,7 +169,6 @@ def handle_move_operation(args, vals):
     results = asset_mover.process_tagged_assets(args.immich_tag)
 
     print_move_results(results)
-    save_move_reports(args, asset_mover)
 
     # Exit after move operation - do not proceed to classification
     sys.exit(0)
@@ -221,7 +212,8 @@ def process_single_file(args, classifier, video_processor):
             min_frames=args.min_frames,
             detection_threshold=args.detection_threshold,
             strict_mode=args.strict_mode,
-            image_threshold=args.threshold
+            image_threshold=args.threshold,
+            quick_sync=args.quick_sync
         )
 
         print("\n--- Video Results ---")
@@ -233,7 +225,8 @@ def process_single_file(args, classifier, video_processor):
         print(f"Detected image file: {args.path}")
         result = classifier.classify_with_cache(
             args.path, threshold=args.threshold,
-            strict_mode=args.strict_mode, force=args.force_reprocess
+            strict_mode=args.strict_mode, force=args.force_reprocess,
+            quick_sync=args.quick_sync
         )
         is_wc = result['is_watercolor']
         confidence = result['confidence']
@@ -249,18 +242,13 @@ def process_single_file(args, classifier, video_processor):
 
 def process_batch(args, classifier, video_processor, timestamp):
     """Process a folder of files."""
-    output_csv = args.output
-    if not output_csv:
-        output_csv = f"watercolor_results_{timestamp}.csv"
-        print(f"No output file specified. Using default: {output_csv}")
-
     # Parse path mappings
     path_mappings = parse_path_mappings_string(args.immich_path_mapping)
 
     print(f"Processing folder: {args.path}")
     batch_processor = BatchProcessor(classifier, video_processor)
     batch_processor.process_folder(
-        args.path, output_csv, min_frames=args.min_frames,
+        args.path, min_frames=args.min_frames,
         detection_threshold=args.detection_threshold,
         strict_mode=args.strict_mode,
         image_threshold=args.threshold,
@@ -268,7 +256,8 @@ def process_batch(args, classifier, video_processor, timestamp):
         immich_api_key=args.immich_key,
         immich_tag=args.immich_tag,
         immich_path_mappings=path_mappings,
-        force_reprocess=args.force_reprocess
+        force_reprocess=args.force_reprocess,
+        quick_sync=args.quick_sync
     )
 
 
@@ -278,10 +267,8 @@ def main():
 
     # Generate timestamp for default report names
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    default_csv = f"move_report_{timestamp}.csv"
-    default_log = f"move_log_{timestamp}.json"
 
-    args = parse_arguments(default_csv, default_log, vals)
+    args = parse_arguments(vals)
 
     # Handle cache operations
     handle_cache_operations(args)

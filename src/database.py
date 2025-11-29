@@ -68,6 +68,9 @@ class DatabaseManager:
                 moved_to TEXT,
                 moved_at TIMESTAMP,
 
+                -- Error tracking
+                error TEXT,
+
                 UNIQUE(file_hash, file_path)
             )
         """)
@@ -93,6 +96,13 @@ class DatabaseManager:
         # Migration: Add top_label column if it doesn't exist
         try:
             cursor.execute("ALTER TABLE classification_results ADD COLUMN top_label TEXT")
+        except sqlite3.OperationalError:
+            # Column likely already exists
+            pass
+
+        # Migration: Add error column if it doesn't exist
+        try:
+            cursor.execute("ALTER TABLE classification_results ADD COLUMN error TEXT")
         except sqlite3.OperationalError:
             # Column likely already exists
             pass
@@ -191,6 +201,38 @@ class DatabaseManager:
         # New file, needs processing
         return True, None
 
+    def check_if_processed_quick(self, file_path: str) -> Tuple[bool, Optional[Dict]]:
+        """
+        Check if file needs processing using quick check (filename only).
+
+        Args:
+            file_path: Path to file
+
+        Returns:
+            Tuple of (needs_processing, cached_result)
+        """
+        if not os.path.exists(file_path):
+            return True, None
+
+        # Normalize path for consistent comparison
+        normalized_path = os.path.normpath(file_path)
+
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT * FROM classification_results
+            WHERE file_path = ?
+            ORDER BY classified_at DESC
+            LIMIT 1
+        """, (normalized_path,))
+
+        row = cursor.fetchone()
+
+        if row:
+            # File exists in DB at this path - assume valid for quick sync
+            return False, dict(row)
+
+        return True, None
+
     def save_result(self, file_path: str, result_data: Dict[str, Any]):
         """
         Save classification result to database.
@@ -233,6 +275,7 @@ class DatabaseManager:
                     percent_watercolor_frames = ?,
                     avg_watercolor_confidence = ?,
                     top_label = ?,
+                    error = ?,
                     classified_at = CURRENT_TIMESTAMP,
                     classification_version = ?
                 WHERE id = ?
@@ -250,6 +293,7 @@ class DatabaseManager:
                 result_data.get('percent_watercolor_frames'),
                 result_data.get('avg_watercolor_confidence'),
                 result_data.get('top_label'),
+                result_data.get('error'),
                 self.VERSION,
                 existing['id']
             ))
@@ -261,8 +305,8 @@ class DatabaseManager:
                     file_type, is_watercolor, confidence,
                     duration_seconds, total_frames, processed_frames, planned_frames,
                     watercolor_frames_count, percent_watercolor_frames,
-                    avg_watercolor_confidence, top_label, classification_version
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    avg_watercolor_confidence, top_label, error, classification_version
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 normalized_path,
                 file_hash,
@@ -279,6 +323,7 @@ class DatabaseManager:
                 result_data.get('percent_watercolor_frames'),
                 result_data.get('avg_watercolor_confidence'),
                 result_data.get('top_label'),
+                result_data.get('error'),
                 self.VERSION
             ))
 
