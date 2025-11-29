@@ -342,9 +342,26 @@ class DatabaseManager:
             UPDATE classification_results SET
                 moved_to = ?,
                 moved_at = CURRENT_TIMESTAMP,
-                file_path = ?
+                file_path = ?,
+                error = NULL
             WHERE file_path = ?
         """, (new_path, new_path, os.path.normpath(old_path)))
+        self.conn.commit()
+
+    def update_move_error(self, file_path: str, error: str):
+        """
+        Update error message when file move fails.
+
+        Args:
+            file_path: File path
+            error: Error message
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            UPDATE classification_results SET
+                error = ?
+            WHERE file_path = ?
+        """, (error, os.path.normpath(file_path)))
         self.conn.commit()
 
     def update_immich_info(self, file_path: str, tag_id: str = None, asset_id: str = None):

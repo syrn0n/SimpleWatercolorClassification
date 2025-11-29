@@ -134,13 +134,22 @@ def parse_path_mappings_string(mapping_string):
 
 
 
-def print_move_results(results):
+def print_move_results(results, transaction_log):
     """Print summary of move operation results."""
     print("\n=== Results ===")
     print(f"Assets found: {results['total']}")
     print(f"Successfully moved: {results['moved']}")
     print(f"Failed to move: {results['failed']}")
     print(f"Deleted from Immich: {results['deleted']}")
+
+    if results['failed'] > 0:
+        print("\n--- Failures ---")
+        for t in transaction_log:
+            if t.get('error'):
+                print(f"Asset ID: {t.get('asset_id')}")
+                print(f"  Path: {t.get('immich_path')}")
+                print(f"  Error: {t.get('error')}")
+                print("-" * 20)
 
 
 def handle_move_operation(args, vals):
@@ -168,7 +177,26 @@ def handle_move_operation(args, vals):
     print("\nProcessing tagged assets...")
     results = asset_mover.process_tagged_assets(args.immich_tag)
 
-    print_move_results(results)
+    # Update database with move results
+    if not args.dry_run and not args.no_cache:
+        try:
+            db = DatabaseManager(args.db_path)
+            print("\nUpdating database with move results...")
+            for t in asset_mover.transaction_log:
+                source_path = t.get('source_path')
+                if not source_path:
+                    continue
+                
+                if t.get('move_success'):
+                    dest_path = t.get('dest_path')
+                    db.update_moved_location(source_path, dest_path)
+                elif t.get('error'):
+                    db.update_move_error(source_path, t.get('error'))
+            print("Database updated.")
+        except Exception as e:
+            print(f"Error updating database: {e}")
+
+    print_move_results(results, asset_mover.transaction_log)
 
     # Exit after move operation - do not proceed to classification
     sys.exit(0)
