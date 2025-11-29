@@ -58,53 +58,58 @@ class BatchProcessor:
             return
 
         results = []
+        tagged_assets = []
 
         # Use tqdm for a progress bar
-        for file_path in tqdm(files_to_process, desc="Processing files"):
-            ext = os.path.splitext(file_path)[1].lower()
-            result_data = None
+        try:
+            for file_path in tqdm(files_to_process, desc="Processing files"):
+                ext = os.path.splitext(file_path)[1].lower()
+                result_data = None
 
-            try:
-                if ext in self.video_exts:
-                    result_data = self._process_video_file(
-                        file_path, min_frames, detection_threshold, strict_mode, image_threshold,
-                        force=force_reprocess, quick_sync=quick_sync
-                    )
-                elif ext in self.image_exts:
-                    result_data = self.classifier.classify_with_cache(
-                        file_path, threshold=image_threshold, strict_mode=strict_mode,
-                        force=force_reprocess, quick_sync=quick_sync
-                    )
-                    # Add missing fields for image result to match expected structure
-                    result_data.update({
-                        "file_path": file_path,
-                        "folder": os.path.dirname(file_path),
-                        "filename": os.path.basename(file_path),
-                        "type": "image",
-                        "duration_seconds": 0,
-                        "processed_frames": 1,
-                        "planned_frames": 1,
-                        "total_frames": 1,
-                        "watercolor_frames_count": 1 if result_data['is_watercolor'] else 0,
-                        "watercolor_frames_percent": 1.0 if result_data['is_watercolor'] else 0.0,
-                        "avg_watercolor_confidence": result_data['confidence'] if result_data['is_watercolor'] else 0.0
-                    })
+                try:
+                    if ext in self.video_exts:
+                        result_data = self._process_video_file(
+                            file_path, min_frames, detection_threshold, strict_mode, image_threshold,
+                            force=force_reprocess, quick_sync=quick_sync
+                        )
+                    elif ext in self.image_exts:
+                        result_data = self.classifier.classify_with_cache(
+                            file_path, threshold=image_threshold, strict_mode=strict_mode,
+                            force=force_reprocess, quick_sync=quick_sync
+                        )
+                        # Add missing fields for image result to match expected structure
+                        result_data.update({
+                            "file_path": file_path,
+                            "folder": os.path.dirname(file_path),
+                            "filename": os.path.basename(file_path),
+                            "type": "image",
+                            "duration_seconds": 0,
+                            "processed_frames": 1,
+                            "planned_frames": 1,
+                            "total_frames": 1,
+                            "watercolor_frames_count": 1 if result_data['is_watercolor'] else 0,
+                            "watercolor_frames_percent": 1.0 if result_data['is_watercolor'] else 0.0,
+                            "avg_watercolor_confidence": result_data['confidence'] if result_data['is_watercolor'] else 0.0
+                        })
 
-                if result_data:
-                    results.append(result_data)
-                    self._tag_asset_if_needed(immich_client, tag_id, file_path, result_data)
+                    if result_data:
+                        results.append(result_data)
+                        self._tag_asset_if_needed(immich_client, tag_id, file_path, result_data, tagged_assets)
 
-            except Exception as e:
-                print(f"Error processing {file_path}: {e}")
-                error_result = self._create_error_result(file_path, str(e))
-                results.append(error_result)
-                
-                # Save error to database
-                if self.classifier.db:
-                    self.classifier.db.save_result(file_path, error_result)
+                except Exception as e:
+                    print(f"Error processing {file_path}: {e}")
+                    error_result = self._create_error_result(file_path, str(e))
+                    results.append(error_result)
+                    
+                    # Save error to database
+                    if self.classifier.db:
+                        self.classifier.db.save_result(file_path, error_result)
+        except KeyboardInterrupt:
+            print("\n\nStopping processing... (Ctrl+C detected)")
+            print("Saving results collected so far...")
 
         # Print Summary
-        self._print_summary(results)
+        self._print_summary(results, tagged_assets)
 
     def _initialize_immich(self, url, api_key, tag, mappings):
         """Initialize Immich client and tag."""
@@ -157,7 +162,7 @@ class BatchProcessor:
             "avg_watercolor_confidence": vid_result['avg_watercolor_confidence']
         }
 
-    def _tag_asset_if_needed(self, immich_client, tag_id, file_path, result_data):
+    def _tag_asset_if_needed(self, immich_client, tag_id, file_path, result_data, tagged_assets: List[str]):
         """Tag the asset in Immich with granular tag based on confidence."""
         if not immich_client:
             return
@@ -173,15 +178,13 @@ class BatchProcessor:
         if granular_tag_name:
             granular_tag_id = immich_client.create_tag_if_not_exists(granular_tag_name)
             if not granular_tag_id:
-                print(f"Failed to create/get tag '{granular_tag_name}'")
+                pass # Fail silently to avoid progress bar interruption
             else:
                 asset_id = immich_client.get_asset_id_from_path(file_path)
                 if asset_id:
                     success = immich_client.add_tag_to_asset(asset_id, granular_tag_id)
                     if success:
-                        print(f"Tagged {os.path.basename(file_path)} with {granular_tag_name}.")
-                    else:
-                        print(f"Failed to tag {os.path.basename(file_path)} with {granular_tag_name}.")
+                        tagged_assets.append(f"{os.path.basename(file_path)} -> {granular_tag_name}")
 
         # Check for "Painting" tag
         top_label = result_data.get('top_label')
@@ -194,9 +197,7 @@ class BatchProcessor:
                 if asset_id:
                     success = immich_client.add_tag_to_asset(asset_id, painting_tag_id)
                     if success:
-                        print(f"Tagged {os.path.basename(file_path)} with 'Painting'.")
-                    else:
-                        print(f"Failed to tag {os.path.basename(file_path)} with 'Painting'.")
+                        tagged_assets.append(f"{os.path.basename(file_path)} -> Painting")
 
     def process_from_db(self, immich_url: str, immich_api_key: str, 
                        immich_path_mappings: Dict[str, str] = None):
@@ -303,7 +304,7 @@ class BatchProcessor:
             "error": error_message
         }
 
-    def _print_summary(self, results: List[Dict]):
+    def _print_summary(self, results: List[Dict], tagged_assets: List[str] = None):
         """Print execution summary."""
         total_files = len(results)
         images = sum(1 for r in results if r.get('type') == 'image')
@@ -319,4 +320,13 @@ class BatchProcessor:
         print(f"  - Videos: {videos}")
         print(f"Watercolor Detections: {watercolors}")
         print(f"Errors Encountered:    {errors}")
+        
+        if tagged_assets:
+            print(f"Assets Tagged:         {len(tagged_assets)}")
+            # Print first few tagged assets or all if list is short
+            for asset in tagged_assets[:10]:
+                print(f"  - {asset}")
+            if len(tagged_assets) > 10:
+                print(f"  ... and {len(tagged_assets) - 10} more")
+        
         print("="*30 + "\n")
