@@ -50,10 +50,14 @@ def parse_arguments(vals):
                         help="Disable database caching")
     parser.add_argument("--force-reprocess", action="store_true", help="Force reprocessing of files even if cached")
     parser.add_argument("--quick-sync", action="store_true", help="Quick sync: check file existence in DB by name only (skips hash check)")
+    parser.add_argument("--reprocess-full", action="store_true",
+                        help="Force reprocess all files, tag in Immich, and move to destination")
     parser.add_argument("--clear-cache", action="store_true", help="Clear the classification cache")
     parser.add_argument("--cache-stats", action="store_true", help="Show cache statistics")
     parser.add_argument("--sync-labels-from-db", action="store_true",
                         help="Sync granular labels from database cache to Immich")
+    parser.add_argument("--process-new", action="store_true",
+                        help="Process new files with quick sync, tag them, and move files with the specified tag")
 
     return parser.parse_args()
 
@@ -227,6 +231,200 @@ def handle_sync_labels_from_db(args, vals):
     sys.exit(0)
 
 
+def handle_process_new_operation(args, vals):
+    """Handle the process-new operation: quick sync, process, tag, and move."""
+    # Validate required arguments
+    if not args.path:
+        print("Error: path is required for process-new operation")
+        sys.exit(1)
+    
+    if not os.path.exists(args.path) or not os.path.isdir(args.path):
+        print(f"Error: Path must be a valid directory: {args.path}")
+        sys.exit(1)
+    
+    validate_move_arguments(args)
+    
+    # Parse path mappings
+    path_mappings = parse_path_mappings_string(args.immich_path_mapping)
+    
+    # Initialize components
+    use_cache = not args.no_cache
+    classifier = WatercolorClassifier(db_path=args.db_path, use_cache=use_cache)
+    video_processor = VideoProcessor(classifier, db_path=args.db_path, use_cache=use_cache)
+    batch_processor = BatchProcessor(classifier, video_processor)
+    
+    print("=" * 60)
+    print("PROCESS NEW: Quick Sync + Tag + Move")
+    print("=" * 60)
+    
+    # Step 1: Process folder with quick sync
+    print(f"\n[Step 1/3] Processing folder with quick sync: {args.path}")
+    print("-" * 60)
+    batch_processor.process_folder(
+        args.path,
+        min_frames=args.min_frames,
+        detection_threshold=args.detection_threshold,
+        strict_mode=args.strict_mode,
+        image_threshold=args.threshold,
+        immich_url=args.immich_url,
+        immich_api_key=args.immich_key,
+        immich_tag=args.immich_tag,
+        immich_path_mappings=path_mappings,
+        force_reprocess=False,  # Never force reprocess in process-new mode
+        quick_sync=True  # Always use quick sync
+    )
+    
+    # Step 2: Move tagged assets
+    print(f"\n[Step 2/3] Moving assets tagged with '{args.immich_tag}'")
+    print("-" * 60)
+    
+    # Confirm move operation
+    confirm_move_operation(args, vals)
+    
+    # Initialize clients for moving
+    immich_client = ImmichClient(
+        args.immich_url,
+        args.immich_key,
+        path_mappings
+    )
+    
+    asset_mover = AssetMover(
+        immich_client,
+        args.move_destination,
+        path_mappings,
+        dry_run=args.dry_run
+    )
+    
+    # Process tagged assets
+    results = asset_mover.process_tagged_assets(args.immich_tag)
+    
+    # Step 3: Update database with move results
+    if not args.dry_run and not args.no_cache:
+        print(f"\n[Step 3/3] Updating database with move results")
+        print("-" * 60)
+        try:
+            db = DatabaseManager(args.db_path)
+            for t in asset_mover.transaction_log:
+                source_path = t.get('source_path')
+                if not source_path:
+                    continue
+                
+                if t.get('move_success'):
+                    dest_path = t.get('dest_path')
+                    db.update_moved_location(source_path, dest_path)
+                elif t.get('error'):
+                    db.update_move_error(source_path, t.get('error'))
+            print("Database updated.")
+        except Exception as e:
+            print(f"Error updating database: {e}")
+    
+    # Print final results
+    print("\n" + "=" * 60)
+    print("PROCESS NEW COMPLETE")
+    print("=" * 60)
+    print_move_results(results, asset_mover.transaction_log)
+    
+    # Exit after process-new operation
+    sys.exit(0)
+
+
+def handle_reprocess_full_operation(args, vals):
+    """Handle the reprocess-full operation: force reprocess, tag, and move."""
+    # Validate required arguments
+    if not args.path:
+        print("Error: path is required for reprocess-full operation")
+        sys.exit(1)
+    
+    if not os.path.exists(args.path) or not os.path.isdir(args.path):
+        print(f"Error: Path must be a valid directory: {args.path}")
+        sys.exit(1)
+    
+    validate_move_arguments(args)
+    
+    # Parse path mappings
+    path_mappings = parse_path_mappings_string(args.immich_path_mapping)
+    
+    # Initialize components
+    use_cache = not args.no_cache
+    classifier = WatercolorClassifier(db_path=args.db_path, use_cache=use_cache)
+    video_processor = VideoProcessor(classifier, db_path=args.db_path, use_cache=use_cache)
+    batch_processor = BatchProcessor(classifier, video_processor)
+    
+    print("=" * 60)
+    print("REPROCESS FULL: Force Reprocess + Tag + Move")
+    print("=" * 60)
+    
+    # Step 1: Process folder with force reprocessing
+    print(f"\n[Step 1/3] Force reprocessing folder: {args.path}")
+    print("-" * 60)
+    batch_processor.process_folder(
+        args.path,
+        min_frames=args.min_frames,
+        detection_threshold=args.detection_threshold,
+        strict_mode=args.strict_mode,
+        image_threshold=args.threshold,
+        immich_url=args.immich_url,
+        immich_api_key=args.immich_key,
+        immich_tag=args.immich_tag,
+        immich_path_mappings=path_mappings,
+        force_reprocess=True,  # Always force reprocess in reprocess-full mode
+        quick_sync=False  # Don't use quick sync when force reprocessing
+    )
+    
+    # Step 2: Move tagged assets
+    print(f"\n[Step 2/3] Moving assets tagged with '{args.immich_tag}'")
+    print("-" * 60)
+    
+    # Confirm move operation
+    confirm_move_operation(args, vals)
+    
+    # Initialize clients for moving
+    immich_client = ImmichClient(
+        args.immich_url,
+        args.immich_key,
+        path_mappings
+    )
+    
+    asset_mover = AssetMover(
+        immich_client,
+        args.move_destination,
+        path_mappings,
+        dry_run=args.dry_run
+    )
+    
+    # Process tagged assets
+    results = asset_mover.process_tagged_assets(args.immich_tag)
+    
+    # Step 3: Update database with move results
+    if not args.dry_run and not args.no_cache:
+        print(f"\n[Step 3/3] Updating database with move results")
+        print("-" * 60)
+        try:
+            db = DatabaseManager(args.db_path)
+            for t in asset_mover.transaction_log:
+                source_path = t.get('source_path')
+                if not source_path:
+                    continue
+                
+                if t.get('move_success'):
+                    dest_path = t.get('dest_path')
+                    db.update_moved_location(source_path, dest_path)
+                elif t.get('error'):
+                    db.update_move_error(source_path, t.get('error'))
+            print("Database updated.")
+        except Exception as e:
+            print(f"Error updating database: {e}")
+    
+    # Print final results
+    print("\n" + "=" * 60)
+    print("REPROCESS FULL COMPLETE")
+    print("=" * 60)
+    print_move_results(results, asset_mover.transaction_log)
+    
+    # Exit after reprocess-full operation
+    sys.exit(0)
+
+
 def process_single_file(args, classifier, video_processor):
     """Process a single file (image or video)."""
     ext = os.path.splitext(args.path)[1].lower()
@@ -312,6 +510,14 @@ def main():
     # Handle sync-labels-from-db mode
     if args.sync_labels_from_db:
         handle_sync_labels_from_db(args, vals)
+
+    # Handle process-new mode
+    if args.process_new:
+        handle_process_new_operation(args, vals)
+
+    # Handle reprocess-full mode
+    if args.reprocess_full:
+        handle_reprocess_full_operation(args, vals)
 
     # Continue with normal classification flow
     if not os.path.exists(args.path):

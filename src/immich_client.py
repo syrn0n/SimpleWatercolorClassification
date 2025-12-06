@@ -171,6 +171,43 @@ class ImmichClient:
             print(f"Error adding tag to asset {asset_id}: {e}")
             return False
 
+    def add_tags_to_assets(self, asset_ids: list, tag_id: str, skip_existing: bool = True) -> bool:
+        """
+        Add a tag to multiple assets in a single API call.
+        
+        Args:
+            asset_ids: List of asset IDs to tag
+            tag_id: Tag ID to apply
+            skip_existing: If True, only tag assets that don't already have this tag
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        if not asset_ids:
+            return True
+            
+        try:
+            # If skip_existing, get current assets with this tag and filter them out
+            if skip_existing:
+                existing_assets = self.get_assets_by_tag(tag_id)
+                existing_ids = {asset['id'] for asset in existing_assets}
+                asset_ids = [aid for aid in asset_ids if aid not in existing_ids]
+                
+                if not asset_ids:
+                    # All assets already have this tag
+                    return True
+            
+            # PUT /api/tags/{id}/assets with multiple IDs
+            response = requests.put(
+                f"{self.url}/api/tags/{tag_id}/assets",
+                json={"ids": asset_ids},
+                headers=self.headers
+            )
+            return response.status_code in (200, 201)
+        except Exception as e:
+            print(f"Error adding tag to assets: {e}")
+            return False
+
     def get_assets_by_tag(self, tag_id: str) -> list:
         """
         Get all assets with the specified tag.
