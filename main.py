@@ -206,7 +206,8 @@ def handle_move_operation(args, vals):
                 
                 if t.get('move_success'):
                     dest_path = t.get('dest_path')
-                    db.update_moved_location(source_path, dest_path)
+                    # Clean up record from DB as requested ("in db - moved assets should be cleaned")
+                    db.delete_record(source_path)
                 elif t.get('error'):
                     db.update_move_error(source_path, t.get('error'))
             print("Database updated.")
@@ -324,7 +325,8 @@ def handle_process_new_operation(args, vals):
                 
                 if t.get('move_success'):
                     dest_path = t.get('dest_path')
-                    db.update_moved_location(source_path, dest_path)
+                    # Clean up record from DB
+                    db.delete_record(source_path)
                 elif t.get('error'):
                     db.update_move_error(source_path, t.get('error'))
             print("Database updated.")
@@ -421,7 +423,8 @@ def handle_reprocess_full_operation(args, vals):
                 
                 if t.get('move_success'):
                     dest_path = t.get('dest_path')
-                    db.update_moved_location(source_path, dest_path)
+                    # Clean up record from DB
+                    db.delete_record(source_path)
                 elif t.get('error'):
                     db.update_move_error(source_path, t.get('error'))
             print("Database updated.")
