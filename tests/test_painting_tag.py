@@ -6,7 +6,8 @@ import sys
 # Add project root to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from src.batch_processor import BatchProcessor
+from src.batch_processor import BatchProcessor  # noqa: E402
+
 
 class TestPaintingTag(unittest.TestCase):
     def setUp(self):
@@ -36,7 +37,7 @@ class TestPaintingTag(unittest.TestCase):
         
         # Verify asset was tagged with "Painting" tag
         # We expect add_tag_to_asset to be called for granular tag AND Painting tag
-        # But since we mocked create_tag_if_not_exists to always return 'tag_id_123', 
+        # But since we mocked create_tag_if_not_exists to always return 'tag_id_123',
         # both calls will use 'tag_id_123'.
         # To be more precise, we can check call count or arguments.
         self.assertEqual(self.immich_client.add_tag_to_asset.call_count, 2)
@@ -73,6 +74,7 @@ class TestPaintingTag(unittest.TestCase):
         # Check that create_tag_if_not_exists was NOT called with 'Painting'
         calls = [args[0] for args, _ in self.immich_client.create_tag_if_not_exists.call_args_list]
         self.assertNotIn('Painting', calls)
+
 
 if __name__ == '__main__':
     unittest.main()

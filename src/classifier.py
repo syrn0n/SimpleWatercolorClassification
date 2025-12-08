@@ -1,9 +1,9 @@
 import torch
 from PIL import Image, ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
-from transformers import CLIPProcessor, CLIPModel
-from typing import Union, Dict, Optional
-from .database import DatabaseManager
+from transformers import CLIPProcessor, CLIPModel  # noqa: E402
+from typing import Union, Dict, Optional  # noqa: E402
+from .database import DatabaseManager  # noqa: E402
 
 
 class WatercolorClassifier:

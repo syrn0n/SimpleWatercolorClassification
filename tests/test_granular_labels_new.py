@@ -1,6 +1,7 @@
 import unittest
 from src.batch_processor import BatchProcessor
 
+
 class TestGranularLabels(unittest.TestCase):
     def test_get_granular_tag(self):
         # Test existing labels
@@ -15,6 +16,7 @@ class TestGranularLabels(unittest.TestCase):
         
         # Test below threshold
         self.assertIsNone(BatchProcessor.get_granular_tag(0.30))
+
 
 if __name__ == '__main__':
     unittest.main()

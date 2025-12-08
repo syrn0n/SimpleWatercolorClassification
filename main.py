@@ -147,10 +147,6 @@ def parse_path_mappings_string(mapping_string):
     return path_mappings
 
 
-
-
-
-
 def print_move_results(results, transaction_log):
     """Print summary of move operation results."""
     print("\n=== Results ===")
@@ -203,9 +199,8 @@ def handle_move_operation(args, vals):
                 source_path = t.get('source_path')
                 if not source_path:
                     continue
-                
+
                 if t.get('move_success'):
-                    dest_path = t.get('dest_path')
                     # Clean up record from DB as requested ("in db - moved assets should be cleaned")
                     db.delete_record(source_path)
                 elif t.get('error'):
@@ -314,7 +309,7 @@ def handle_process_new_operation(args, vals):
     
     # Step 3: Update database with move results
     if not args.dry_run and not args.no_cache:
-        print(f"\n[Step 3/3] Updating database with move results")
+        print("\n[Step 3/3] Updating database with move results")
         print("-" * 60)
         try:
             db = DatabaseManager(args.db_path)
@@ -324,7 +319,6 @@ def handle_process_new_operation(args, vals):
                     continue
                 
                 if t.get('move_success'):
-                    dest_path = t.get('dest_path')
                     # Clean up record from DB
                     db.delete_record(source_path)
                 elif t.get('error'):
@@ -412,7 +406,7 @@ def handle_reprocess_full_operation(args, vals):
     
     # Step 3: Update database with move results
     if not args.dry_run and not args.no_cache:
-        print(f"\n[Step 3/3] Updating database with move results")
+        print("\n[Step 3/3] Updating database with move results")
         print("-" * 60)
         try:
             db = DatabaseManager(args.db_path)
@@ -422,7 +416,6 @@ def handle_reprocess_full_operation(args, vals):
                     continue
                 
                 if t.get('move_success'):
-                    dest_path = t.get('dest_path')
                     # Clean up record from DB
                     db.delete_record(source_path)
                 elif t.get('error'):

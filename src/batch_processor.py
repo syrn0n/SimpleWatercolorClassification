@@ -265,7 +265,7 @@ class BatchProcessor:
                     if success and tagged_assets is not None:
                         tagged_assets.append(f"{os.path.basename(file_path)} -> Painting")
 
-    def process_from_db(self, immich_url: str, immich_api_key: str, 
+    def process_from_db(self, immich_url: str, immich_api_key: str,
                        immich_path_mappings: Dict[str, str] = None):
         """
         Process all cached results from database and apply granular tags to Immich.
@@ -290,8 +290,8 @@ class BatchProcessor:
             try:
                 from .database import DatabaseManager
                 # Assuming default path if not accessible, but ideally should be passed
-                db = DatabaseManager() 
-            except:
+                db = DatabaseManager()
+            except Exception:
                 print("Error: No database available")
                 return
 
@@ -307,14 +307,14 @@ class BatchProcessor:
         
         # Helper to get results
         try:
-             results = list(db.get_all_results())
+            results = list(db.get_all_results())
         except Exception:
-             # Fallback if db is not connected
-             from .database import DatabaseManager
-             db_path = self.classifier.db_path if hasattr(self.classifier, 'db_path') else "classification_cache.db"
-             with DatabaseManager(db_path) as temp_db:
-                 results = list(temp_db.get_all_results())
-                 db = temp_db # Use this one for updates
+            # Fallback if db is not connected
+            from .database import DatabaseManager
+            db_path = self.classifier.db_path if hasattr(self.classifier, 'db_path') else "classification_cache.db"
+            with DatabaseManager(db_path) as temp_db:
+                results = list(temp_db.get_all_results())
+                db = temp_db # Use this one for updates
 
         total_files = len(results)
         print(f"Found {total_files} cached results.")
@@ -359,11 +359,11 @@ class BatchProcessor:
             identifiers = [a[0] for a in assets]
             
             # Call batch tagging API
-            success_ids = immich_client.add_tags_to_assets(identifiers, tag_id)
+            immich_client.add_tags_to_assets(identifiers, tag_id)
             
             # Update database for successful tags
             # Note: success_ids might returns IDs that were successfully tagged
-            # We will assume all were tagged for DB update purposes to keep it simple, 
+            # We will assume all were tagged for DB update purposes to keep it simple,
             # as failures usually raise exceptions
             
             for identifier, result_data in assets:
@@ -371,20 +371,19 @@ class BatchProcessor:
                 # Optimistically update DB
                 try:
                     db.update_immich_info(
-                        file_path, 
-                        tag_id=tag_id, 
-                        asset_id=result_data.get('immich_asset_id') 
+                        file_path,
+                        tag_id=tag_id,
+                        asset_id=result_data.get('immich_asset_id')
                     )
                     processed_count += 1
                 except Exception as e:
                     print(f"Error updating DB for {file_path}: {e}")
                     error_count += 1
                     
-        print(f"\nSync complete.")
+        print("\nSync complete.")
         print(f"Processed: {processed_count}")
         print(f"Skipped (already tagged or low confidence): {skipped_count}")
         print(f"Errors: {error_count}")
-
 
     def _create_error_result(self, file_path, error_message="Unknown error"):
         """Create a result dictionary for an error case."""
@@ -415,9 +414,9 @@ class BatchProcessor:
         watercolors = sum(1 for r in results if r.get('is_watercolor'))
         errors = sum(1 for r in results if r.get('error'))
         
-        print("\n" + "="*30)
+        print("\n" + "=" * 30)
         print("       EXECUTION SUMMARY")
-        print("="*30)
+        print("=" * 30)
         print(f"Total Files Processed: {total_files}")
         print(f"  - Images: {images}")
         print(f"  - Videos: {videos}")
@@ -432,4 +431,4 @@ class BatchProcessor:
             if len(tagged_assets) > 10:
                 print(f"  ... and {len(tagged_assets) - 10} more")
         
-        print("="*30 + "\n")
+        print("=" * 30 + "\n")
