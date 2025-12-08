@@ -56,6 +56,7 @@ def parse_arguments(vals):
     parser.add_argument("--cache-stats", action="store_true", help="Show cache statistics")
     parser.add_argument("--sync-labels-from-db", action="store_true",
                         help="Sync granular labels from database cache to Immich")
+    parser.add_argument("--prune-moved", action="store_true", help="Remove records of previously moved files from database")
     parser.add_argument("--process-new", action="store_true",
                         help="Process new files with quick sync, tag them, and move files with the specified tag")
 
@@ -77,6 +78,18 @@ def handle_cache_operations(args):
         print("\n=== Cache Statistics ===")
         for key, value in stats.items():
             print(f"{key}: {value}")
+        if not args.path:
+            sys.exit(0)
+
+    if args.prune_moved:
+        db = DatabaseManager(args.db_path)
+        count_moved = db.prune_moved_records()
+        print(f"Pruned {count_moved} records marked as moved.")
+        
+        print("Checking for missing files...")
+        count_missing = db.prune_missing_files()
+        print(f"Pruned {count_missing} records for missing files.")
+        
         if not args.path:
             sys.exit(0)
 

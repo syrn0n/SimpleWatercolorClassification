@@ -329,6 +329,69 @@ class DatabaseManager:
 
         self.conn.commit()
 
+    def delete_record(self, file_path: str):
+        """
+        Delete a classification record.
+
+        Args:
+            file_path: Path to file
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            DELETE FROM classification_results
+            WHERE file_path = ?
+        """, (os.path.normpath(file_path),))
+        self.conn.commit()
+
+    def prune_moved_records(self) -> int:
+        """
+        Delete all records that have been marked as moved.
+
+        Returns:
+            Number of deleted records
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            DELETE FROM classification_results
+            WHERE moved_to IS NOT NULL
+        """)
+        count = cursor.rowcount
+        self.conn.commit()
+        self.conn.commit()
+        return count
+
+    def prune_missing_files(self) -> int:
+        """
+        Delete records for files that no longer exist on disk.
+        
+        Returns:
+            Number of deleted records
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT file_path FROM classification_results")
+        all_rows = cursor.fetchall()
+        
+        missing_paths = []
+        for row in all_rows:
+            if not os.path.exists(row['file_path']):
+                missing_paths.append(row['file_path'])
+        
+        if not missing_paths:
+            return 0
+            
+        # Delete in batches
+        batch_size = 500
+        total_deleted = 0
+        
+        for i in range(0, len(missing_paths), batch_size):
+            batch = missing_paths[i:i + batch_size]
+            placeholders = ','.join(['?'] * len(batch))
+            cursor.execute(f"DELETE FROM classification_results WHERE file_path IN ({placeholders})", batch)
+            total_deleted += cursor.rowcount
+            
+        self.conn.commit()
+        return total_deleted
+
     def update_moved_location(self, old_path: str, new_path: str):
         """
         Update file location when file is moved.

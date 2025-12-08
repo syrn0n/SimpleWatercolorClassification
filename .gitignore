@@ -33,4 +33,4 @@ tests/coverage
 # Env file
 .env
 
-classification_cache.db
+*.db
