@@ -18,7 +18,8 @@
             "console": "integratedTerminal",
             "python": "${workspaceFolder}/.venv/Scripts/python.exe",
             "args": [
-                "E:\\library\\library\\admin"
+                "E:\\library\\library\\admin\\2025",
+                "--sync-labels-from-db"
             ],
             "justMyCode": true
         }

@@ -182,6 +182,9 @@ class BatchProcessor:
         # Group assets by tag
         tag_to_assets = defaultdict(list)  # tag_name -> [(file_path, asset_id), ...]
         
+        # Pre-fetch all asset paths for efficiency
+        immich_client.prefetch_asset_path_map()
+        
         print("\nResolving asset IDs for tagging...")
         for result in tqdm(results, desc="Resolving assets"):
             file_path = result.get('file_path')
@@ -285,15 +288,8 @@ class BatchProcessor:
         # Get database instance
         db = self.classifier.db or self.video_processor.db
         if not db:
-            # Try to create a new DB connection if instances don't have one
-            # This happens when BatchProcessor is initialized without full context
-            try:
-                from .database import DatabaseManager
-                # Assuming default path if not accessible, but ideally should be passed
-                db = DatabaseManager()
-            except Exception:
-                print("Error: No database available")
-                return
+            print("Error: Database cache is disabled or not available.")
+            return
 
         print("Loading cached results from database...")
         
@@ -301,20 +297,11 @@ class BatchProcessor:
         skipped_count = 0
         error_count = 0
 
-        # We need to access DB directly, so ensure we have a valid connection or use context manager
-        # Since we might be using the classifier's DB which is already open, or a new one
-        # Let's try to use the existing one if open, or open a new one
-        
-        # Helper to get results
         try:
             results = list(db.get_all_results())
-        except Exception:
-            # Fallback if db is not connected
-            from .database import DatabaseManager
-            db_path = self.classifier.db_path if hasattr(self.classifier, 'db_path') else "classification_cache.db"
-            with DatabaseManager(db_path) as temp_db:
-                results = list(temp_db.get_all_results())
-                db = temp_db # Use this one for updates
+        except Exception as e:
+            print(f"Error reading from database: {e}")
+            return
 
         total_files = len(results)
         print(f"Found {total_files} cached results.")
@@ -323,62 +310,79 @@ class BatchProcessor:
         valid_results = [r for r in results if r.get('confidence') is not None]
         
         # Prepare for batch logic
-        files_to_tag = {}  # tag_id -> list of (asset_id or file_path, result_data)
+        files_to_tag = {}  # tag_id -> list of (asset_id, result_data)
 
         print("Analyzing files for tagging...")
+        # Pre-fetch all asset paths for efficiency
+        immich_client.prefetch_asset_path_map()
+        
+        painting_labels = ["a watercolor painting", "an oil painting", "an acrylic painting"]
+
         for result in tqdm(valid_results):
-            # Skip if already tagged in Immich
-            # if result.get('immich_tagged'):
-            #     skipped_count += 1
-            #     continue
-                
-            confidence = result.get('confidence')
             file_path = result.get('file_path')
+            confidence = result.get('confidence')
+            top_label = result.get('top_label')
             
-            tag_name = BatchProcessor.get_granular_tag(confidence)
+            # 1. Determine tags for this file
+            target_tags = []
             
-            if tag_name:
-                # Get tag ID (cached in client)
+            # Granular tag
+            granular_tag = BatchProcessor.get_granular_tag(confidence)
+            if granular_tag:
+                target_tags.append(granular_tag)
+            
+            # Painting tag
+            if top_label in painting_labels:
+                target_tags.append("Painting")
+            
+            if not target_tags:
+                skipped_count += 1
+                continue
+
+            # 2. Resolve Asset ID
+            asset_id = result.get('immich_asset_id')
+            if not asset_id:
+                asset_id = immich_client.get_asset_id_from_path(file_path)
+            
+            if not asset_id:
+                error_count += 1
+                continue
+
+            # 3. Add to batch lists
+            for tag_name in target_tags:
                 tag_id = immich_client.create_tag_if_not_exists(tag_name)
-                
                 if tag_id:
                     if tag_id not in files_to_tag:
                         files_to_tag[tag_id] = []
-                        
-                    # Use stored asset ID if available, otherwise use file path
-                    identifier = result.get('immich_asset_id') or file_path
-                    files_to_tag[tag_id].append((identifier, result))
-            else:
-                skipped_count += 1
+                    files_to_tag[tag_id].append((asset_id, result))
 
         # Process tags in batches
-        print(f"\nApplying tags to {sum(len(v) for v in files_to_tag.values())} assets...")
+        print(f"\nApplying tags to {sum(len(v) for v in files_to_tag.values())} asset-tag pairs...")
         
+        # Keep track of successfully tagged IDs to update DB
+        # file_path -> {tag_id, asset_id}
+        successful_updates = {}
+
         for tag_id, assets in files_to_tag.items():
-            # Extract identifiers (asset_ids or paths)
-            identifiers = [a[0] for a in assets]
+            # Extract asset IDs
+            asset_ids = [a[0] for a in assets]
             
-            # Call batch tagging API
-            immich_client.add_tags_to_assets(identifiers, tag_id)
-            
-            # Update database for successful tags
-            # Note: success_ids might returns IDs that were successfully tagged
-            # We will assume all were tagged for DB update purposes to keep it simple,
-            # as failures usually raise exceptions
-            
-            for identifier, result_data in assets:
-                file_path = result_data.get('file_path')
-                # Optimistically update DB
-                try:
-                    db.update_immich_info(
-                        file_path,
-                        tag_id=tag_id,
-                        asset_id=result_data.get('immich_asset_id')
-                    )
+            # Call batch tagging API (skip_existing=True is default)
+            if immich_client.add_tags_to_assets(asset_ids, tag_id):
+                for asset_id, result_data in assets:
+                    fp = result_data.get('file_path')
+                    successful_updates[fp] = (tag_id, asset_id)
                     processed_count += 1
-                except Exception as e:
-                    print(f"Error updating DB for {file_path}: {e}")
-                    error_count += 1
+            else:
+                error_count += len(assets)
+
+        # Update database
+        print(f"Updating database for {len(successful_updates)} files...")
+        for fp, (tag_id, asset_id) in successful_updates.items():
+            try:
+                db.update_immich_info(fp, tag_id=tag_id, asset_id=asset_id)
+            except Exception as e:
+                print(f"Error updating DB for {fp}: {e}")
                     
         print("\nSync complete.")
         print(f"Processed: {processed_count}")

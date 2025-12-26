@@ -202,6 +202,14 @@ class AssetMover:
         for asset in tqdm(assets, desc="Processing assets", unit="asset"):
             self._process_single_asset(asset, results)
 
+        # Empty trash if any assets were deleted and not a dry run
+        if results["deleted"] > 0 and not self.dry_run:
+            print(f"\nEmptying Immich trash ({results['deleted']} assets deleted)...")
+            if self.immich_client.empty_trash():
+                print("Trash emptied successfully.")
+            else:
+                print("Failed to empty trash.")
+
         return results
 
     def _process_single_asset(self, asset: Dict, results: Dict[str, int]):

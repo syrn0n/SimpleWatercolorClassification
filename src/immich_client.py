@@ -20,35 +20,22 @@ class ImmichClient:
             'Content-Type': 'application/json',
             'Accept': 'application/json'
         }
+        self._asset_path_map = None
 
     def get_asset_id_from_path(self, file_path: str) -> Optional[str]:
         """
         Try to find an asset in Immich by its original file path.
         """
+        # If we have a cached map, use it
+        if self._asset_path_map is not None:
+            # We need to translate the path first to match what Immich has
+            translated_path = self.translate_path_to_immich(file_path)
+            return self._asset_path_map.get(translated_path)
+
+        # Fallback to metadata search
         # Normalize input path for matching
         normalized_path = os.path.normpath(file_path)
-
-        # Translate path
-        translated_path = file_path # Default to original if no mapping found
-
-        for local_prefix, remote_prefix in self.path_mappings.items():
-            if normalized_path.startswith(local_prefix):
-                # Replace prefix
-                # Get the relative part of the path
-                relative_path = normalized_path[len(local_prefix):]
-                # If relative path starts with a separator, remove it
-                if relative_path.startswith(os.sep):
-                    relative_path = relative_path[1:]
-
-                # Convert to forward slashes for Immich/Remote
-                remote_suffix = relative_path.replace(os.sep, '/')
-
-                # Join with remote prefix, ensuring single slash
-                if remote_prefix.endswith('/'):
-                    translated_path = remote_prefix + remote_suffix
-                else:
-                    translated_path = remote_prefix + '/' + remote_suffix
-                break
+        translated_path = self.translate_path_to_immich(file_path)
 
         try:
             # Use the metadata search endpoint with originalPath
@@ -78,6 +65,83 @@ class ImmichClient:
             print(f"Error searching for asset {file_path}: {e}")
 
         return None
+
+    def translate_path_to_immich(self, local_path: str) -> str:
+        """Translate a local file path to an Immich originalPath."""
+        normalized_path = os.path.normpath(local_path)
+        translated_path = local_path # Default
+
+        for local_prefix, remote_prefix in self.path_mappings.items():
+            # Handle case-insensitive path matching on Windows
+            if os.name == 'nt':
+                matches = normalized_path.lower().startswith(local_prefix.lower())
+            else:
+                matches = normalized_path.startswith(local_prefix)
+
+            if matches:
+                relative_path = normalized_path[len(local_prefix):]
+                if relative_path.startswith(os.sep):
+                    relative_path = relative_path[1:]
+
+                remote_suffix = relative_path.replace(os.sep, '/')
+                if remote_prefix.endswith('/'):
+                    translated_path = remote_prefix + remote_suffix
+                else:
+                    translated_path = remote_prefix + '/' + remote_suffix
+                break
+        return translated_path
+
+    def prefetch_asset_path_map(self):
+        """Pre-fetch all assets from Immich and build a path -> ID map for performance."""
+        print("Pre-fetching asset list from Immich for performance optimization...")
+        self._asset_path_map = {}
+        skip = 0
+        take = self.PAGE_SIZE
+        endpoint = "/api/assets"
+        
+        # Test which endpoint works (some versions use /api/asset, others /api/assets)
+        try:
+            test_resp = requests.get(f"{self.url}{endpoint}", headers=self.headers, params={"skip": 0, "take": 1})
+            if test_resp.status_code == 404:
+                endpoint = "/api/asset"
+        except:
+            endpoint = "/api/asset"
+
+        while True:
+            try:
+                response = requests.get(
+                    f"{self.url}{endpoint}",
+                    headers=self.headers,
+                    params={"skip": skip, "take": take}
+                )
+                if response.status_code != 200:
+                    print(f"Error fetching assets: HTTP {response.status_code} from {endpoint}")
+                    break
+                
+                assets = response.json()
+                if not assets or not isinstance(assets, list):
+                    if skip == 0:
+                        print(f"No assets returned from {endpoint}.")
+                    break
+                
+                # Debug: check keys of first asset to ensure originalPath exists
+                if skip == 0 and assets:
+                    first_asset = assets[0]
+                    if 'originalPath' not in first_asset:
+                        print(f"Warning: 'originalPath' not found in asset metadata. Available keys: {list(first_asset.keys())}")
+
+                for asset in assets:
+                    path = asset.get('originalPath')
+                    if path:
+                        self._asset_path_map[path] = asset.get('id')
+                
+                if len(assets) < take:
+                    break
+                skip += take
+            except Exception as e:
+                print(f"Error pre-fetching assets: {e}")
+                break
+        print(f"Loaded {len(self._asset_path_map)} assets into path map.")
 
     def reverse_path_mapping(self, immich_path: str) -> Optional[str]:
         """
@@ -256,13 +320,56 @@ class ImmichClient:
         """
         Delete an asset from Immich.
         """
+        return self.delete_assets([asset_id])
+
+    def empty_trash(self) -> bool:
+        """
+        Permanently delete all items in the trash.
+        """
         try:
+            response = requests.post(
+                f"{self.url}/api/trash/empty",
+                headers=self.headers
+            )
+            return response.status_code in (200, 201, 204)
+        except Exception as e:
+            print(f"Error emptying trash: {e}")
+            return False
+
+    def get_duplicate_assets(self) -> list:
+        """
+        Get all duplicate asset groups from Immich.
+        """
+        try:
+            response = requests.get(
+                f"{self.url}/api/duplicates",
+                headers=self.headers
+            )
+            if response.status_code == 200:
+                return response.json()
+            else:
+                print(f"Failed to get duplicates: {response.text}")
+                return []
+        except Exception as e:
+            print(f"Error getting duplicates: {e}")
+            return []
+
+    def delete_assets(self, asset_ids: list) -> bool:
+        """
+        Delete multiple assets from Immich in bulk.
+        """
+        if not asset_ids:
+            return True
+            
+        try:
+            # POST /api/assets (DELETE method with body containing IDs)
+            # Actually Immich uses DELETE /api/assets with a body
             response = requests.delete(
                 f"{self.url}/api/assets",
-                json={"ids": [asset_id]},
+                json={"ids": asset_ids},
                 headers=self.headers
             )
             return response.status_code in (200, 204)
         except Exception as e:
-            print(f"Error deleting asset {asset_id}: {e}")
+            print(f"Error deleting assets: {e}")
             return False

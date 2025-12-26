@@ -9,6 +9,7 @@ from src.batch_processor import BatchProcessor
 from src.asset_mover import AssetMover
 from src.immich_client import ImmichClient
 from src.database import DatabaseManager
+from src.dedup_processor import DedupProcessor
 
 
 def parse_arguments(vals):
@@ -58,7 +59,12 @@ def parse_arguments(vals):
                         help="Sync granular labels from database cache to Immich")
     parser.add_argument("--prune-moved", action="store_true", help="Remove records of previously moved files from database")
     parser.add_argument("--process-new", action="store_true",
-                        help="Process new files with quick sync, tag them, and move files with the specified tag")
+                        help="Analyze duplicates, process new files, tag them, and move files")
+    parser.add_argument("--dedup", action="store_true", help="Delete duplicate files in Immich")
+    parser.add_argument("--immich-internal-path", default=os.getenv("IMMICH_INTERNAL_PATH"),
+                        help="Immich internal storage path prefix")
+    parser.add_argument("--immich-picture-library-path", default=os.getenv("IMMICH_PICTURE_LIBRARY_PATH"),
+                        help="Immich picture library path prefix")
 
     return parser.parse_args()
 
@@ -106,6 +112,17 @@ def validate_move_arguments(args):
 
     if not args.immich_path_mapping:
         print("Error: Path mapping is required for move operation")
+        sys.exit(1)
+
+
+def validate_dedup_arguments(args):
+    """Validate arguments required for deduplication."""
+    if not args.immich_url or not args.immich_key:
+        print("Error: Immich URL and API key are required for deduplication")
+        sys.exit(1)
+
+    if not args.immich_internal_path:
+        print("Error: --immich-internal-path is required for deduplication")
         sys.exit(1)
 
 
@@ -240,8 +257,33 @@ def handle_sync_labels_from_db(args, vals):
     sys.exit(0)
 
 
+def handle_dedup_operation(args, vals):
+    """Handle the deduplication operation."""
+    validate_dedup_arguments(args)
+
+    # Initialize Immich client
+    immich_client = ImmichClient(
+        args.immich_url,
+        args.immich_key
+    )
+
+    # Initialize DedupProcessor
+    dedup_processor = DedupProcessor(
+        immich_client,
+        args.immich_internal_path,
+        args.immich_picture_library_path
+    )
+
+    print("\nStarting deduplication...")
+    dedup_processor.execute(dry_run=args.dry_run)
+
+    # Exit after dedup operation if called directly
+    if not args.process_new:
+        sys.exit(0)
+
+
 def handle_process_new_operation(args, vals):
-    """Handle the process-new operation: quick sync, process, tag, and move."""
+    """Handle the process-new operation: dedup, quick sync, process, tag, and move."""
     # Validate required arguments
     if not args.path:
         print("Error: path is required for process-new operation")
@@ -252,6 +294,7 @@ def handle_process_new_operation(args, vals):
         sys.exit(1)
     
     validate_move_arguments(args)
+    validate_dedup_arguments(args)
     
     # Parse path mappings
     path_mappings = parse_path_mappings_string(args.immich_path_mapping)
@@ -263,11 +306,16 @@ def handle_process_new_operation(args, vals):
     batch_processor = BatchProcessor(classifier, video_processor)
     
     print("=" * 60)
-    print("PROCESS NEW: Quick Sync + Tag + Move")
+    print("PROCESS NEW: Dedup + Quick Sync + Tag + Move")
     print("=" * 60)
+
+    # Step 1: Deduplication
+    print(f"\n[Step 1/4] Analyzing duplicates in Immich")
+    print("-" * 60)
+    handle_dedup_operation(args, vals)
     
-    # Step 1: Process folder with quick sync
-    print(f"\n[Step 1/3] Processing folder with quick sync: {args.path}")
+    # Step 2: Process folder with quick sync
+    print(f"\n[Step 2/4] Processing folder with quick sync: {args.path}")
     print("-" * 60)
     batch_processor.process_folder(
         args.path,
@@ -283,8 +331,8 @@ def handle_process_new_operation(args, vals):
         quick_sync=True  # Always use quick sync
     )
     
-    # Step 2: Move tagged assets
-    print(f"\n[Step 2/3] Moving assets tagged with '{args.immich_tag}'")
+    # Step 3: Move tagged assets
+    print(f"\n[Step 3/4] Moving assets tagged with '{args.immich_tag}'")
     print("-" * 60)
     
     # Confirm move operation
@@ -307,9 +355,9 @@ def handle_process_new_operation(args, vals):
     # Process tagged assets
     results = asset_mover.process_tagged_assets(args.immich_tag)
     
-    # Step 3: Update database with move results
+    # Step 4: Update database with move results
     if not args.dry_run and not args.no_cache:
-        print("\n[Step 3/3] Updating database with move results")
+        print("\n[Step 4/4] Updating database with move results")
         print("-" * 60)
         try:
             db = DatabaseManager(args.db_path)
@@ -508,7 +556,7 @@ def main():
     # Handle cache operations
     handle_cache_operations(args)
 
-    if not args.path and not args.move_tagged_assets:
+    if not args.path and not args.move_tagged_assets and not args.dedup:
         print("Error: the following arguments are required: path")
         sys.exit(1)
 
@@ -527,6 +575,10 @@ def main():
     # Handle reprocess-full mode
     if args.reprocess_full:
         handle_reprocess_full_operation(args, vals)
+
+    # Handle dedup mode
+    if args.dedup:
+        handle_dedup_operation(args, vals)
 
     # Continue with normal classification flow
     if not os.path.exists(args.path):
