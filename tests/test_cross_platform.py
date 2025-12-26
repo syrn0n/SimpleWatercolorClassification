@@ -58,11 +58,13 @@ class TestCrossPlatformPaths:
         client.get_asset_id_from_path(input_path)
 
         # Verify the call to requests.post used the correct translated path
-        # It should be "/library/file.jpg"
+        # It should try "/library/file.jpg" first
         expected_translated_path = "/library/file.jpg"
-
-        args, kwargs = mock_post.call_args
-        assert kwargs['json']['originalPath'] == expected_translated_path
+        
+        # We check the first call in the list, as the robustness logic might 
+        # make subsequent fallback calls if the first one returns no items.
+        first_call_json = mock_post.call_args_list[0].kwargs['json']
+        assert first_call_json['originalPath'] == expected_translated_path
 
     def test_reverse_mapping_handles_mixed_input(self):
         """Test reverse mapping handles Immich paths correctly"""

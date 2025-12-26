@@ -1,15 +1,15 @@
 import torch
 from PIL import Image, ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
-from transformers import CLIPProcessor, CLIPModel  # noqa: E402
+from transformers import SiglipProcessor, SiglipModel  # noqa: E402
 from typing import Union, Dict, Optional  # noqa: E402
 from .database import DatabaseManager  # noqa: E402
 
 
 class WatercolorClassifier:
-    def __init__(self, model_name: str = "openai/clip-vit-base-patch32", db_path: str = None, use_cache: bool = True):
+    def __init__(self, model_name: str = "google/siglip-base-patch16-224", db_path: str = None, use_cache: bool = True):
         """
-        Initialize the CLIP model and processor.
+        Initialize the SigLIP model and processor.
         """
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         # For Mac M1/M2/M3 chips, use mps if available
@@ -17,8 +17,8 @@ class WatercolorClassifier:
             self.device = "mps"
 
         print(f"Loading model {model_name} on {self.device}...")
-        self.model = CLIPModel.from_pretrained(model_name).to(self.device)
-        self.processor = CLIPProcessor.from_pretrained(model_name)
+        self.model = SiglipModel.from_pretrained(model_name).to(self.device)
+        self.processor = SiglipProcessor.from_pretrained(model_name)
 
         # Define the labels we want to classify against
         self.labels = [

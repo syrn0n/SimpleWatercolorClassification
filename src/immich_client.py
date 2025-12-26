@@ -69,12 +69,10 @@ class ImmichClient:
                     assets = results.get('assets', {}).get('items', [])
 
                     if assets:
-                        # Return the first match.
+                        # Return the first match if it matches the path we searched for
                         asset = assets[0]
-                        asset_id = asset.get('id')
-                        # Log success for debugging if needed
-                        # print(f"Found asset {asset_id} for path {path}")
-                        return asset_id
+                        if asset.get('originalPath') == path:
+                            return asset['id']
 
             except Exception as e:
                 print(f"Error searching for asset {file_path} at path {path}: {e}")
@@ -89,15 +87,18 @@ class ImmichClient:
         for local_prefix, remote_prefix in self.path_mappings.items():
             # Handle case-insensitive path matching on Windows
             if os.name == 'nt':
-                matches = normalized_path.lower().startswith(local_prefix.lower())
+                prefix_matches = normalized_path.lower().startswith(local_prefix.lower())
             else:
-                matches = normalized_path.startswith(local_prefix)
+                prefix_matches = normalized_path.startswith(local_prefix)
 
-            if matches:
-                relative_path = normalized_path[len(local_prefix):]
-                if relative_path.startswith(os.sep):
-                    relative_path = relative_path[1:]
-
+            if prefix_matches:
+                # Ensure it's a true prefix match by checking if the next character 
+                # in normalized_path is a separator or if we're at the end
+                if len(normalized_path) > len(local_prefix):
+                    if normalized_path[len(local_prefix)] != os.sep:
+                        continue
+                
+                relative_path = normalized_path[len(local_prefix):].lstrip(os.sep)
                 remote_suffix = relative_path.replace(os.sep, '/')
                 
                 # Ensure remote_prefix uses forward slashes
@@ -109,11 +110,13 @@ class ImmichClient:
                     translated_path = remote_prefix_clean + '/' + remote_suffix
                 break
         
-        # Final cleanup: ensure no double slashes except possibly at start
-        if translated_path.startswith('//'):
-            translated_path = '/' + translated_path.lstrip('/')
-        else:
-            translated_path = translated_path.replace('//', '/')
+        # Final cleanup: ensure no double slashes but preserve leading /
+        # Collapse multiple slashes while preserving absolute path status
+        is_abs = translated_path.startswith('/')
+        parts = [p for p in translated_path.split('/') if p]
+        translated_path = '/'.join(parts)
+        if is_abs:
+            translated_path = '/' + translated_path
             
         return translated_path
 

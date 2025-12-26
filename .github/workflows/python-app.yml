@@ -16,7 +16,7 @@ jobs:
   build:
     strategy:
       matrix:
-        python-version: ["3.10"] # Keeping 3.10 as per original, but now using matrix for uv setup
+        python-version: ["3.13"]
 
     runs-on: ubuntu-latest
 

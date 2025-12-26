@@ -75,6 +75,17 @@
             "justMyCode": true
         },
         {
+            "name": "Immich: Move Tagged Assets",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--move-tagged-assets",
+            ],
+            "justMyCode": true
+        },
+        {
             "name": "Immich: Deduplication Only (Dry Run)",
             "type": "debugpy",
             "request": "launch",
