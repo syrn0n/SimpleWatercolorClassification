@@ -2,24 +2,109 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python: Current File",
-            "type": "python",
-            "request": "launch",
-            "program": "${file}",
-            "console": "integratedTerminal",
-            "python": "${workspaceFolder}/.venv/Scripts/python.exe",
-            "justMyCode": true
-        },
-        {
-            "name": "Python: Main",
-            "type": "python",
+            "name": "Immich: Sync Labels from DB",
+            "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/main.py",
             "console": "integratedTerminal",
-            "python": "${workspaceFolder}/.venv/Scripts/python.exe",
             "args": [
-                "E:\\library\\library\\admin\\2025",
+                "E:\\library\\library\\admin\\2025\\12",
                 "--sync-labels-from-db"
+            ],
+            "justMyCode": true
+        },
+        {
+            "name": "Immich: Classify Folder",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "console": "integratedTerminal",
+            "args": [
+                "E:\\library\\library\\admin\\2025\\12"
+            ],
+            "justMyCode": true
+        },
+        {
+            "name": "Immich: Process New (Full Flow - Dry Run)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "console": "integratedTerminal",
+            "args": [
+                "E:\\library\\library\\admin\\2025\\12",
+                "--process-new",
+                "--dry-run"
+            ],
+            "justMyCode": true
+        },
+        {
+            "name": "Immich: Process New (Full Flow - REAL)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "console": "integratedTerminal",
+            "args": [
+                "E:\\library\\library\\admin\\2025\\12",
+                "--process-new"
+            ],
+            "justMyCode": true
+        },
+        {
+            "name": "Immich: Reprocess Full (Dry Run)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "console": "integratedTerminal",
+            "args": [
+                "E:\\library\\library\\admin\\2025\\12",
+                "--reprocess-full",
+                "--dry-run"
+            ],
+            "justMyCode": true
+        },
+        {
+            "name": "Immich: Move Tagged Assets (Dry Run)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--move-tagged-assets",
+                "--dry-run"
+            ],
+            "justMyCode": true
+        },
+        {
+            "name": "Immich: Deduplication Only (Dry Run)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--dedup",
+                "--dry-run"
+            ],
+            "justMyCode": true
+        },
+        {
+            "name": "Cache: Stats",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--cache-stats"
+            ],
+            "justMyCode": true
+        },
+        {
+            "name": "Cache: Clear",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--clear-cache"
             ],
             "justMyCode": true
         }

@@ -197,6 +197,7 @@ class BatchProcessor:
             # Get asset ID once for this file
             asset_id = immich_client.get_asset_id_from_path(file_path)
             if not asset_id:
+                print(f"  Warning: Could not find asset in Immich: {file_path}")
                 continue
             
             # Add to granular tag group
@@ -310,7 +311,8 @@ class BatchProcessor:
         valid_results = [r for r in results if r.get('confidence') is not None]
         
         # Prepare for batch logic
-        files_to_tag = {}  # tag_id -> list of (asset_id, result_data)
+        files_to_tag = {}  # tag_name -> list of (asset_id, result_data)
+        tag_name_to_id = {} # tag_name -> tag_id
 
         print("Analyzing files for tagging...")
         # Pre-fetch all asset paths for efficiency
@@ -345,6 +347,7 @@ class BatchProcessor:
                 asset_id = immich_client.get_asset_id_from_path(file_path)
             
             if not asset_id:
+                print(f"  Warning: Could not find asset in Immich: {file_path}")
                 error_count += 1
                 continue
 
@@ -352,9 +355,10 @@ class BatchProcessor:
             for tag_name in target_tags:
                 tag_id = immich_client.create_tag_if_not_exists(tag_name)
                 if tag_id:
-                    if tag_id not in files_to_tag:
-                        files_to_tag[tag_id] = []
-                    files_to_tag[tag_id].append((asset_id, result))
+                    tag_name_to_id[tag_name] = tag_id
+                    if tag_name not in files_to_tag:
+                        files_to_tag[tag_name] = []
+                    files_to_tag[tag_name].append((asset_id, result))
 
         # Process tags in batches
         print(f"\nApplying tags to {sum(len(v) for v in files_to_tag.values())} asset-tag pairs...")
@@ -362,8 +366,10 @@ class BatchProcessor:
         # Keep track of successfully tagged IDs to update DB
         # file_path -> {tag_id, asset_id}
         successful_updates = {}
+        tagged_details = []
 
-        for tag_id, assets in files_to_tag.items():
+        for tag_name, assets in files_to_tag.items():
+            tag_id = tag_name_to_id[tag_name]
             # Extract asset IDs
             asset_ids = [a[0] for a in assets]
             
@@ -373,6 +379,7 @@ class BatchProcessor:
                     fp = result_data.get('file_path')
                     successful_updates[fp] = (tag_id, asset_id)
                     processed_count += 1
+                    tagged_details.append(f"{os.path.basename(fp)} -> {tag_name}")
             else:
                 error_count += len(assets)
 
@@ -388,6 +395,11 @@ class BatchProcessor:
         print(f"Processed: {processed_count}")
         print(f"Skipped (already tagged or low confidence): {skipped_count}")
         print(f"Errors: {error_count}")
+        
+        if tagged_details:
+            print("\nTagged Assets:")
+            for detail in tagged_details:
+                print(f"  - {detail}")
 
     def _create_error_result(self, file_path, error_message="Unknown error"):
         """Create a result dictionary for an error case."""
@@ -429,10 +441,7 @@ class BatchProcessor:
         
         if tagged_assets:
             print(f"Assets Tagged:         {len(tagged_assets)}")
-            # Print first few tagged assets or all if list is short
-            for asset in tagged_assets[:10]:
+            for asset in tagged_assets:
                 print(f"  - {asset}")
-            if len(tagged_assets) > 10:
-                print(f"  ... and {len(tagged_assets) - 10} more")
         
         print("=" * 30 + "\n")

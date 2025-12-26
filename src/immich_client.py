@@ -30,46 +30,61 @@ class ImmichClient:
         if self._asset_path_map is not None:
             # We need to translate the path first to match what Immich has
             translated_path = self.translate_path_to_immich(file_path)
-            return self._asset_path_map.get(translated_path)
+            asset_id = self._asset_path_map.get(translated_path)
+            if asset_id:
+                return asset_id
+            
+            # Try with/without leading slash if not found
+            if translated_path.startswith('/'):
+                asset_id = self._asset_path_map.get(translated_path[1:])
+            else:
+                asset_id = self._asset_path_map.get('/' + translated_path)
+            
+            if asset_id:
+                return asset_id
 
         # Fallback to metadata search
-        # Normalize input path for matching
-        normalized_path = os.path.normpath(file_path)
         translated_path = self.translate_path_to_immich(file_path)
+        
+        # Paths to try (original, without leading slash, with leading slash)
+        paths_to_try = [translated_path]
+        if translated_path.startswith('/'):
+            paths_to_try.append(translated_path[1:])
+        else:
+            paths_to_try.append('/' + translated_path)
 
-        try:
-            # Use the metadata search endpoint with originalPath
-            search_url = f"{self.url}/api/search/metadata"
-            payload = {
-                "originalPath": translated_path
-            }
+        for path in paths_to_try:
+            try:
+                search_url = f"{self.url}/api/search/metadata"
+                payload = {"originalPath": path}
 
-            response = requests.post(
-                search_url,
-                json=payload,
-                headers=self.headers
-            )
+                response = requests.post(
+                    search_url,
+                    json=payload,
+                    headers=self.headers
+                )
 
-            if response.status_code == 200:
-                results = response.json()
-                assets = results.get('assets', {}).get('items', [])
+                if response.status_code == 200:
+                    results = response.json()
+                    assets = results.get('assets', {}).get('items', [])
 
-                if assets:
-                    # Return the first match.
-                    # Verify that the returned asset's path matches what we requested
-                    asset = assets[0]
-                    if asset.get('originalPath') == translated_path:
-                        return asset['id']
+                    if assets:
+                        # Return the first match.
+                        asset = assets[0]
+                        asset_id = asset.get('id')
+                        # Log success for debugging if needed
+                        # print(f"Found asset {asset_id} for path {path}")
+                        return asset_id
 
-        except Exception as e:
-            print(f"Error searching for asset {file_path}: {e}")
+            except Exception as e:
+                print(f"Error searching for asset {file_path} at path {path}: {e}")
 
         return None
 
     def translate_path_to_immich(self, local_path: str) -> str:
         """Translate a local file path to an Immich originalPath."""
         normalized_path = os.path.normpath(local_path)
-        translated_path = local_path # Default
+        translated_path = normalized_path.replace(os.sep, '/') # Default: just normalize slashes
 
         for local_prefix, remote_prefix in self.path_mappings.items():
             # Handle case-insensitive path matching on Windows
@@ -84,60 +99,93 @@ class ImmichClient:
                     relative_path = relative_path[1:]
 
                 remote_suffix = relative_path.replace(os.sep, '/')
-                if remote_prefix.endswith('/'):
-                    translated_path = remote_prefix + remote_suffix
+                
+                # Ensure remote_prefix uses forward slashes
+                remote_prefix_clean = remote_prefix.replace('\\', '/')
+                
+                if remote_prefix_clean.endswith('/'):
+                    translated_path = remote_prefix_clean + remote_suffix
                 else:
-                    translated_path = remote_prefix + '/' + remote_suffix
+                    translated_path = remote_prefix_clean + '/' + remote_suffix
                 break
+        
+        # Final cleanup: ensure no double slashes except possibly at start
+        if translated_path.startswith('//'):
+            translated_path = '/' + translated_path.lstrip('/')
+        else:
+            translated_path = translated_path.replace('//', '/')
+            
         return translated_path
 
     def prefetch_asset_path_map(self):
         """Pre-fetch all assets from Immich and build a path -> ID map for performance."""
         print("Pre-fetching asset list from Immich for performance optimization...")
         self._asset_path_map = {}
-        skip = 0
-        take = self.PAGE_SIZE
-        endpoint = "/api/assets"
+        page = 1
+        page_size = self.PAGE_SIZE
         
-        # Test which endpoint works (some versions use /api/asset, others /api/assets)
-        try:
-            test_resp = requests.get(f"{self.url}{endpoint}", headers=self.headers, params={"skip": 0, "take": 1})
-            if test_resp.status_code == 404:
-                endpoint = "/api/asset"
-        except:
-            endpoint = "/api/asset"
-
         while True:
             try:
-                response = requests.get(
-                    f"{self.url}{endpoint}",
+                # Use search/metadata as the most reliable way to list assets in newer versions
+                # search/metadata uses POST /api/search/metadata
+                response = requests.post(
+                    f"{self.url}/api/search/metadata",
                     headers=self.headers,
-                    params={"skip": skip, "take": take}
+                    json={
+                        "page": page,
+                        "size": page_size,
+                        "withExif": False # We only need the path and ID
+                    }
                 )
-                if response.status_code != 200:
-                    print(f"Error fetching assets: HTTP {response.status_code} from {endpoint}")
-                    break
                 
-                assets = response.json()
-                if not assets or not isinstance(assets, list):
-                    if skip == 0:
-                        print(f"No assets returned from {endpoint}.")
-                    break
-                
-                # Debug: check keys of first asset to ensure originalPath exists
-                if skip == 0 and assets:
-                    first_asset = assets[0]
-                    if 'originalPath' not in first_asset:
-                        print(f"Warning: 'originalPath' not found in asset metadata. Available keys: {list(first_asset.keys())}")
+                # If POST /api/search/metadata fails with 404 or 405, fall back to old endpoints
+                if response.status_code in (404, 405):
+                    endpoint = "/api/assets" if page == 1 else endpoint # placeholder logic
+                    # Try GET /api/assets as fallback
+                    response = requests.get(
+                        f"{self.url}/api/assets",
+                        headers=self.headers,
+                        params={"skip": (page - 1) * page_size, "take": page_size}
+                    )
+                    if response.status_code == 404:
+                        # Try GET /api/asset as last resort
+                        response = requests.get(
+                            f"{self.url}/api/asset",
+                            headers=self.headers,
+                            params={"skip": (page - 1) * page_size, "take": page_size}
+                        )
 
+                if response.status_code != 200:
+                    print(f"Error fetching assets (page {page}): HTTP {response.status_code}")
+                    break
+                
+                results = response.json()
+                # Handle different response formats: 
+                # Newer versions return object with {'assets': {'items': [...]}}
+                # Older versions might return a flat list
+                assets = []
+                if isinstance(results, list):
+                    assets = results
+                elif isinstance(results, dict):
+                    if 'assets' in results and 'items' in results['assets']:
+                        assets = results['assets']['items']
+                    elif 'items' in results:
+                        assets = results['items']
+                    elif 'assets' in results and isinstance(results['assets'], list):
+                        assets = results['assets']
+
+                if not assets:
+                    break
+                
                 for asset in assets:
                     path = asset.get('originalPath')
                     if path:
                         self._asset_path_map[path] = asset.get('id')
                 
-                if len(assets) < take:
+                if len(assets) < page_size:
                     break
-                skip += take
+                page += 1
+                
             except Exception as e:
                 print(f"Error pre-fetching assets: {e}")
                 break
@@ -172,7 +220,6 @@ class ImmichClient:
         Create a tag if it doesn't exist, return its ID.
         """
         try:
-            # First, list tags to see if it exists
             # First, list tags to see if it exists
             page = 1
             while True:
@@ -211,8 +258,12 @@ class ImmichClient:
             )
             if response.status_code in (200, 201):
                 return response.json()['id']
+            elif response.status_code == 409:
+                # Conflict - likely tag was created between our check and create call
+                # Re-check tags to get the ID
+                return self.create_tag_if_not_exists(tag_name)
             else:
-                print(f"Failed to create tag {tag_name}: {response.text}")
+                print(f"Failed to create tag {tag_name}: {response.status_code} - {response.text}")
 
         except Exception as e:
             print(f"Error creating tag {tag_name}: {e}")
@@ -267,9 +318,18 @@ class ImmichClient:
                 json={"ids": asset_ids},
                 headers=self.headers
             )
-            return response.status_code in (200, 201)
+            
+            if response.status_code not in (200, 201):
+                print(f"Error adding tag to assets: HTTP {response.status_code}")
+                try:
+                    print(f"Server response: {response.text}")
+                except:
+                    pass
+                return False
+                
+            return True
         except Exception as e:
-            print(f"Error adding tag to assets: {e}")
+            print(f"Exception adding tag to assets: {e}")
             return False
 
     def get_assets_by_tag(self, tag_id: str) -> list:
