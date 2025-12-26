@@ -62,44 +62,17 @@ class BatchProcessor:
         # Use tqdm for a progress bar
         try:
             for file_path in tqdm(files_to_process, desc="Processing files"):
-                ext = os.path.splitext(file_path)[1].lower()
-                result_data = None
-
                 try:
-                    if ext in self.video_exts:
-                        result_data = self._process_video_file(
-                            file_path, min_frames, detection_threshold, strict_mode, image_threshold,
-                            force=force_reprocess, quick_sync=quick_sync
-                        )
-                    elif ext in self.image_exts:
-                        result_data = self.classifier.classify_with_cache(
-                            file_path, threshold=image_threshold, strict_mode=strict_mode,
-                            force=force_reprocess, quick_sync=quick_sync
-                        )
-                        # Add missing fields for image result to match expected structure
-                        result_data.update({
-                            "file_path": file_path,
-                            "folder": os.path.dirname(file_path),
-                            "filename": os.path.basename(file_path),
-                            "type": "image",
-                            "duration_seconds": 0,
-                            "processed_frames": 1,
-                            "planned_frames": 1,
-                            "total_frames": 1,
-                            "watercolor_frames_count": 1 if result_data['is_watercolor'] else 0,
-                            "watercolor_frames_percent": 1.0 if result_data['is_watercolor'] else 0.0,
-                            "avg_watercolor_confidence": result_data['confidence'] if result_data['is_watercolor'] else 0.0
-                        })
-
+                    result_data = self._process_file_in_batch(
+                        file_path, min_frames, detection_threshold, strict_mode,
+                        image_threshold, force_reprocess, quick_sync
+                    )
                     if result_data:
                         results.append(result_data)
-
                 except Exception as e:
                     print(f"Error processing {file_path}: {e}")
                     error_result = self._create_error_result(file_path, str(e))
                     results.append(error_result)
-                    
-                    # Save error to database
                     if self.classifier.db:
                         self.classifier.db.save_result(file_path, error_result)
         except KeyboardInterrupt:
@@ -233,30 +206,32 @@ class BatchProcessor:
         return tagged_assets
 
     def _tag_asset_if_needed(self, immich_client, tag_id, file_path, result_data, tagged_assets: List[str] = None):
-        """Tag the asset in Immich with granular tag based on confidence."""
+        """Tag the asset in Immich with granular and painting tags."""
         if not immich_client:
             return
             
+        # 1. Applying Granular Tag
+        self._apply_granular_tag(immich_client, file_path, result_data, tagged_assets)
+
+        # 2. Applying Painting Tag
+        self._apply_painting_tag(immich_client, file_path, result_data, tagged_assets)
+
+    def _apply_granular_tag(self, immich_client, file_path, result_data, tagged_assets):
+        """Apply granular tag based on confidence."""
         confidence = result_data.get('confidence', 0.0)
         granular_tag_name = self.get_granular_tag(confidence)
         
-        if not granular_tag_name:
-            # Even if no granular tag, we might still want to add "Painting" tag
-            pass
-            
-        # Create/get the granular tag
         if granular_tag_name:
             granular_tag_id = immich_client.create_tag_if_not_exists(granular_tag_name)
-            if not granular_tag_id:
-                pass # Fail silently to avoid progress bar interruption
-            else:
+            if granular_tag_id:
                 asset_id = immich_client.get_asset_id_from_path(file_path)
                 if asset_id:
                     success = immich_client.add_tag_to_asset(asset_id, granular_tag_id)
                     if success and tagged_assets is not None:
                         tagged_assets.append(f"{os.path.basename(file_path)} -> {granular_tag_name}")
 
-        # Check for "Painting" tag
+    def _apply_painting_tag(self, immich_client, file_path, result_data, tagged_assets):
+        """Apply 'Painting' tag if the asset is classified as a painting."""
         top_label = result_data.get('top_label')
         painting_labels = ["a watercolor painting", "an oil painting", "an acrylic painting"]
         
@@ -269,89 +244,106 @@ class BatchProcessor:
                     if success and tagged_assets is not None:
                         tagged_assets.append(f"{os.path.basename(file_path)} -> Painting")
 
+    def _process_file_in_batch(self, file_path, min_frames, detection_threshold,
+                             strict_mode, image_threshold, force, quick_sync) -> Optional[Dict]:
+        """Process a single file during batch folder processing."""
+        ext = os.path.splitext(file_path)[1].lower()
+        
+        if ext in self.video_exts:
+            return self._process_video_file(
+                file_path, min_frames, detection_threshold, strict_mode,
+                image_threshold, force=force, quick_sync=quick_sync
+            )
+        
+        if ext in self.image_exts:
+            result_data = self.classifier.classify_with_cache(
+                file_path, threshold=image_threshold, strict_mode=strict_mode,
+                force=force, quick_sync=quick_sync
+            )
+            # Add missing fields for image result to match expected structure
+            result_data.update({
+                "file_path": file_path,
+                "folder": os.path.dirname(file_path),
+                "filename": os.path.basename(file_path),
+                "type": "image",
+                "duration_seconds": 0,
+                "processed_frames": 1,
+                "planned_frames": 1,
+                "total_frames": 1,
+                "watercolor_frames_count": 1 if result_data['is_watercolor'] else 0,
+                "watercolor_frames_percent": 1.0 if result_data['is_watercolor'] else 0.0,
+                "avg_watercolor_confidence": result_data['confidence'] if result_data['is_watercolor'] else 0.0
+            })
+            return result_data
+            
+        return None
+
     def process_from_db(self, immich_url: str, immich_api_key: str,
                        immich_path_mappings: Dict[str, str] = None):
         """
         Process all cached results from database and apply granular tags to Immich.
-        
-        Args:
-            immich_url: Immich server URL
-            immich_api_key: Immich API key
-            immich_path_mappings: Path mappings for local to remote paths
         """
         if not immich_url or not immich_api_key:
             print("Error: Immich URL and API key are required")
             return
             
-        # Initialize Immich client
         immich_client = ImmichClient(immich_url, immich_api_key, immich_path_mappings)
-        
-        # Get database instance
         db = self.classifier.db or self.video_processor.db
         if not db:
             print("Error: Database cache is disabled or not available.")
             return
 
         print("Loading cached results from database...")
-        
-        processed_count = 0
-        skipped_count = 0
-        error_count = 0
-
         try:
             results = list(db.get_all_results())
         except Exception as e:
             print(f"Error reading from database: {e}")
             return
 
-        total_files = len(results)
-        print(f"Found {total_files} cached results.")
-
-        # Filter for results that have classification data
+        print(f"Found {len(results)} cached results.")
         valid_results = [r for r in results if r.get('confidence') is not None]
         
-        # Prepare for batch logic
-        files_to_tag = {}  # tag_name -> list of (asset_id, result_data)
-        tag_name_to_id = {} # tag_name -> tag_id
+        # Collect assets and their target tags
+        files_to_tag, tag_name_to_id, skipped, errors = self._collect_assets_to_tag(immich_client, valid_results)
+        
+        # Apply tags in batches
+        processed, tagged_details, error_inc = self._apply_batch_tags_from_db(immich_client, files_to_tag, tag_name_to_id)
+        
+        # Update database
+        print(f"Updating database for {len(tagged_details)} files...")
+        for fp, (tag_id, asset_id) in tagged_details:
+            try:
+                db.update_immich_info(fp, tag_id=tag_id, asset_id=asset_id)
+            except Exception as e:
+                print(f"Error updating DB for {fp}: {e}")
+                    
+        print("\nSync complete.")
+        print(f"Processed: {processed}")
+        print(f"Skipped: {skipped}")
+        print(f"Errors: {errors + error_inc}")
 
+    def _collect_assets_to_tag(self, immich_client, valid_results):
+        """Collect assets from DB results and determine their target tags."""
+        files_to_tag = {} # tag_name -> list of (asset_id, result_data)
+        tag_name_to_id = {}
+        skipped = 0
+        errors = 0
+        
         print("Analyzing files for tagging...")
-        # Pre-fetch all asset paths for efficiency
         immich_client.prefetch_asset_path_map()
         
-        painting_labels = ["a watercolor painting", "an oil painting", "an acrylic painting"]
-
         for result in tqdm(valid_results):
-            file_path = result.get('file_path')
-            confidence = result.get('confidence')
-            top_label = result.get('top_label')
-            
-            # 1. Determine tags for this file
-            target_tags = []
-            
-            # Granular tag
-            granular_tag = BatchProcessor.get_granular_tag(confidence)
-            if granular_tag:
-                target_tags.append(granular_tag)
-            
-            # Painting tag
-            if top_label in painting_labels:
-                target_tags.append("Painting")
-            
+            target_tags = self._get_target_tags_for_result(result)
             if not target_tags:
-                skipped_count += 1
+                skipped += 1
                 continue
 
-            # 2. Resolve Asset ID
-            asset_id = result.get('immich_asset_id')
+            asset_id = result.get('immich_asset_id') or immich_client.get_asset_id_from_path(result.get('file_path'))
             if not asset_id:
-                asset_id = immich_client.get_asset_id_from_path(file_path)
-            
-            if not asset_id:
-                print(f"  Warning: Could not find asset in Immich: {file_path}")
-                error_count += 1
+                print(f"  Warning: Could not find asset in Immich: {result.get('file_path')}")
+                errors += 1
                 continue
 
-            # 3. Add to batch lists
             for tag_name in target_tags:
                 tag_id = immich_client.create_tag_if_not_exists(tag_name)
                 if tag_id:
@@ -359,47 +351,48 @@ class BatchProcessor:
                     if tag_name not in files_to_tag:
                         files_to_tag[tag_name] = []
                     files_to_tag[tag_name].append((asset_id, result))
-
-        # Process tags in batches
-        print(f"\nApplying tags to {sum(len(v) for v in files_to_tag.values())} asset-tag pairs...")
         
-        # Keep track of successfully tagged IDs to update DB
-        # file_path -> {tag_id, asset_id}
-        successful_updates = {}
-        tagged_details = []
+        return files_to_tag, tag_name_to_id, skipped, errors
 
+    def _get_target_tags_for_result(self, result):
+        """Determine which tags should be applied to a result."""
+        target_tags = []
+        confidence = result.get('confidence')
+        top_label = result.get('top_label')
+        
+        granular_tag = BatchProcessor.get_granular_tag(confidence)
+        if granular_tag:
+            target_tags.append(granular_tag)
+        
+        painting_labels = ["a watercolor painting", "an oil painting", "an acrylic painting"]
+        if top_label in painting_labels:
+            target_tags.append("Painting")
+            
+        return target_tags
+
+    def _apply_batch_tags_from_db(self, immich_client, files_to_tag, tag_name_to_id):
+        """Apply tags in batches and collect successful updates."""
+        processed = 0
+        tagged_details = [] # list of (file_path, (tag_id, asset_id))
+        errors = 0
+        
+        if not files_to_tag:
+            return 0, [], 0
+
+        print(f"\nApplying tags to {sum(len(v) for v in files_to_tag.values())} asset-tag pairs...")
         for tag_name, assets in files_to_tag.items():
             tag_id = tag_name_to_id[tag_name]
-            # Extract asset IDs
             asset_ids = [a[0] for a in assets]
             
-            # Call batch tagging API (skip_existing=True is default)
             if immich_client.add_tags_to_assets(asset_ids, tag_id):
                 for asset_id, result_data in assets:
                     fp = result_data.get('file_path')
-                    successful_updates[fp] = (tag_id, asset_id)
-                    processed_count += 1
-                    tagged_details.append(f"{os.path.basename(fp)} -> {tag_name}")
+                    tagged_details.append((fp, (tag_id, asset_id)))
+                    processed += 1
             else:
-                error_count += len(assets)
-
-        # Update database
-        print(f"Updating database for {len(successful_updates)} files...")
-        for fp, (tag_id, asset_id) in successful_updates.items():
-            try:
-                db.update_immich_info(fp, tag_id=tag_id, asset_id=asset_id)
-            except Exception as e:
-                print(f"Error updating DB for {fp}: {e}")
-                    
-        print("\nSync complete.")
-        print(f"Processed: {processed_count}")
-        print(f"Skipped (already tagged or low confidence): {skipped_count}")
-        print(f"Errors: {error_count}")
+                errors += len(assets)
         
-        if tagged_details:
-            print("\nTagged Assets:")
-            for detail in tagged_details:
-                print(f"  - {detail}")
+        return processed, tagged_details, errors
 
     def _create_error_result(self, file_path, error_message="Unknown error"):
         """Create a result dictionary for an error case."""

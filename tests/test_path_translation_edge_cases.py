@@ -2,6 +2,7 @@ import pytest
 import os
 from src.immich_client import ImmichClient
 
+
 class TestPathTranslationEdgeCases:
     def test_prefix_boundary_match(self):
         """Test that mapping only matches at directory boundaries."""

@@ -82,56 +82,56 @@ class AssetMover:
     def move_file(self, source_path: str, dest_path: str) -> tuple[bool, Optional[str], str]:
         """
         Move file from source to destination.
-
-        Args:
-            source_path: Local source file path
-            dest_path: Local destination file path
-
-        Returns:
-            Tuple of (success, error_message, actual_dest_path)
         """
         try:
-            # Check if source file exists
             if not os.path.exists(source_path):
                 return False, f"Source file not found: {source_path}", dest_path
 
             if self.dry_run:
-                # In dry-run mode, just simulate success
                 return True, None, dest_path
 
-            # Create destination directory if needed
-            dest_dir = os.path.dirname(dest_path)
+            # Create destination directory
             try:
-                os.makedirs(dest_dir, exist_ok=True)
+                os.makedirs(os.path.dirname(dest_path), exist_ok=True)
             except Exception as e:
                 return False, f"Failed to create destination directory: {str(e)}", dest_path
 
-            # Check if destination already exists
+            # Handle existing file at destination
             if os.path.exists(dest_path):
-                # Compare file hashes to see if it's the same file
-                source_hash = self.calculate_file_hash(source_path)
-                dest_hash = self.calculate_file_hash(dest_path)
-
-                if source_hash and dest_hash and source_hash == dest_hash:
-                    # Files are identical, just remove source
-                    try:
-                        os.remove(source_path)
-                        return True, None, dest_path
-                    except Exception as e:
-                        return False, f"Failed to remove duplicate source file: {str(e)}", dest_path
-                else:
-                    # Different files at destination - rename
-                    dest_path = self._get_unique_dest_path(dest_path)
+                success, error, dest_path = self._handle_existing_dest_file(source_path, dest_path)
+                if not success or not os.path.exists(source_path):
+                    return success, error, dest_path
 
             # Move the file
-            try:
-                shutil.move(source_path, dest_path)
-                return True, None, dest_path
-            except Exception as e:
-                return False, f"Failed to move file: {str(e)}", dest_path
+            success, error = self._perform_shutil_move(source_path, dest_path)
+            return success, error, dest_path
 
         except Exception as e:
             return False, f"Unexpected error: {str(e)}", dest_path
+
+    def _perform_shutil_move(self, source_path: str, dest_path: str) -> tuple[bool, Optional[str]]:
+        """Perform the actual file move using shutil.move."""
+        try:
+            shutil.move(source_path, dest_path)
+            return True, None
+        except Exception as e:
+            return False, f"Failed to move file: {str(e)}"
+
+    def _handle_existing_dest_file(self, source_path: str, dest_path: str) -> tuple[bool, Optional[str], str]:
+        """Handle case where destination file already exists."""
+        source_hash = self.calculate_file_hash(source_path)
+        dest_hash = self.calculate_file_hash(dest_path)
+
+        if source_hash and dest_hash and source_hash == dest_hash:
+            # Files are identical, just remove source
+            try:
+                os.remove(source_path)
+                return True, None, dest_path
+            except Exception as e:
+                return False, f"Failed to remove duplicate source file: {str(e)}", dest_path
+        
+        # Different files at destination - get unique name
+        return True, None, self._get_unique_dest_path(dest_path)
 
     def save_transaction_log(self, filename: str):
         """

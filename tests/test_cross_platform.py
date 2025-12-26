@@ -61,7 +61,7 @@ class TestCrossPlatformPaths:
         # It should try "/library/file.jpg" first
         expected_translated_path = "/library/file.jpg"
         
-        # We check the first call in the list, as the robustness logic might 
+        # We check the first call in the list, as the robustness logic might
         # make subsequent fallback calls if the first one returns no items.
         first_call_json = mock_post.call_args_list[0].kwargs['json']
         assert first_call_json['originalPath'] == expected_translated_path

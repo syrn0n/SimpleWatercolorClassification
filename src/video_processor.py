@@ -41,7 +41,7 @@ class VideoProcessor:
 
         print(f"Processing video: {video_path}")
         print(f"Duration: {duration:.2f}s, FPS: {fps}, Total Frames: {total_frames}")
-        print(f"Sampling every {frame_interval} frames (approx every {frame_interval/fps:.2f}s)")
+        print(f"Sampling every {frame_interval} frames (approx every {frame_interval / fps:.2f}s)")
         print(f"Planned frames to process: ~{planned_frames_count}")
 
         pbar = tqdm(total=planned_frames_count)

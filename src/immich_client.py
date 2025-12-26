@@ -28,22 +28,28 @@ class ImmichClient:
         """
         # If we have a cached map, use it
         if self._asset_path_map is not None:
-            # We need to translate the path first to match what Immich has
             translated_path = self.translate_path_to_immich(file_path)
-            asset_id = self._asset_path_map.get(translated_path)
-            if asset_id:
-                return asset_id
-            
-            # Try with/without leading slash if not found
-            if translated_path.startswith('/'):
-                asset_id = self._asset_path_map.get(translated_path[1:])
-            else:
-                asset_id = self._asset_path_map.get('/' + translated_path)
-            
+            asset_id = self._find_asset_in_cache(translated_path)
             if asset_id:
                 return asset_id
 
         # Fallback to metadata search
+        return self._search_asset_by_metadata(file_path)
+
+    def _find_asset_in_cache(self, translated_path: str) -> Optional[str]:
+        """Look for translated path in the cached asset map."""
+        asset_id = self._asset_path_map.get(translated_path)
+        if asset_id:
+            return asset_id
+        
+        # Try with/without leading slash
+        if translated_path.startswith('/'):
+            return self._asset_path_map.get(translated_path[1:])
+        else:
+            return self._asset_path_map.get('/' + translated_path)
+
+    def _search_asset_by_metadata(self, file_path: str) -> Optional[str]:
+        """Search for asset using API metadata search."""
         translated_path = self.translate_path_to_immich(file_path)
         
         # Paths to try (original, without leading slash, with leading slash)
@@ -56,62 +62,54 @@ class ImmichClient:
         for path in paths_to_try:
             try:
                 search_url = f"{self.url}/api/search/metadata"
-                payload = {"originalPath": path}
-
                 response = requests.post(
                     search_url,
-                    json=payload,
+                    json={"originalPath": path},
                     headers=self.headers
                 )
 
                 if response.status_code == 200:
                     results = response.json()
                     assets = results.get('assets', {}).get('items', [])
-
-                    if assets:
-                        # Return the first match if it matches the path we searched for
-                        asset = assets[0]
-                        if asset.get('originalPath') == path:
-                            return asset['id']
-
+                    if assets and assets[0].get('originalPath') == path:
+                        return assets[0]['id']
             except Exception as e:
                 print(f"Error searching for asset {file_path} at path {path}: {e}")
-
         return None
 
     def translate_path_to_immich(self, local_path: str) -> str:
         """Translate a local file path to an Immich originalPath."""
-        normalized_path = os.path.normpath(local_path)
-        translated_path = normalized_path.replace(os.sep, '/') # Default: just normalize slashes
+        local_path_forward = local_path.replace('\\', '/')
+        
+        # Default: just ensure all slashes are forward
+        translated_path = local_path_forward
 
         for local_prefix, remote_prefix in self.path_mappings.items():
-            # Handle case-insensitive path matching on Windows
-            if os.name == 'nt':
-                prefix_matches = normalized_path.lower().startswith(local_prefix.lower())
+            local_prefix_forward = local_prefix.replace('\\', '/')
+            
+            # Case-insensitive if it looks like a Windows path (drive letter or unc)
+            is_windows_path = ':' in local_path_forward or local_path_forward.startswith('//')
+            if os.name == 'nt' or is_windows_path:
+                prefix_matches = local_path_forward.lower().startswith(local_prefix_forward.lower())
             else:
-                prefix_matches = normalized_path.startswith(local_prefix)
+                prefix_matches = local_path_forward.startswith(local_prefix_forward)
 
             if prefix_matches:
-                # Ensure it's a true prefix match by checking if the next character 
-                # in normalized_path is a separator or if we're at the end
-                if len(normalized_path) > len(local_prefix):
-                    if normalized_path[len(local_prefix)] != os.sep:
+                # Ensure it's a true prefix match by checking separator at boundary
+                if len(local_path_forward) > len(local_prefix_forward):
+                    if local_path_forward[len(local_prefix_forward)] != '/':
                         continue
                 
-                relative_path = normalized_path[len(local_prefix):].lstrip(os.sep)
-                remote_suffix = relative_path.replace(os.sep, '/')
-                
-                # Ensure remote_prefix uses forward slashes
+                relative_path = local_path_forward[len(local_prefix_forward):].lstrip('/')
                 remote_prefix_clean = remote_prefix.replace('\\', '/')
                 
                 if remote_prefix_clean.endswith('/'):
-                    translated_path = remote_prefix_clean + remote_suffix
+                    translated_path = remote_prefix_clean + relative_path
                 else:
-                    translated_path = remote_prefix_clean + '/' + remote_suffix
+                    translated_path = remote_prefix_clean + '/' + relative_path
                 break
         
-        # Final cleanup: ensure no double slashes but preserve leading /
-        # Collapse multiple slashes while preserving absolute path status
+        # Final cleanup: collapse multiple slashes
         is_abs = translated_path.startswith('/')
         parts = [p for p in translated_path.split('/') if p]
         translated_path = '/'.join(parts)
@@ -129,53 +127,15 @@ class ImmichClient:
         
         while True:
             try:
-                # Use search/metadata as the most reliable way to list assets in newer versions
-                # search/metadata uses POST /api/search/metadata
-                response = requests.post(
-                    f"{self.url}/api/search/metadata",
-                    headers=self.headers,
-                    json={
-                        "page": page,
-                        "size": page_size,
-                        "withExif": False # We only need the path and ID
-                    }
-                )
-                
-                # If POST /api/search/metadata fails with 404 or 405, fall back to old endpoints
-                if response.status_code in (404, 405):
-                    # Try GET /api/assets as fallback
-                    response = requests.get(
-                        f"{self.url}/api/assets",
-                        headers=self.headers,
-                        params={"skip": (page - 1) * page_size, "take": page_size}
-                    )
-                    if response.status_code == 404:
-                        # Try GET /api/asset as last resort
-                        response = requests.get(
-                            f"{self.url}/api/asset",
-                            headers=self.headers,
-                            params={"skip": (page - 1) * page_size, "take": page_size}
-                        )
-
-                if response.status_code != 200:
-                    print(f"Error fetching assets (page {page}): HTTP {response.status_code}")
+                response = self._fetch_assets_page(page, page_size)
+                if response is None or response.status_code != 200:
+                    if response:
+                        print(f"Error fetching assets (page {page}): HTTP {response.status_code}")
                     break
                 
                 results = response.json()
-                # Handle different response formats: 
-                # Newer versions return object with {'assets': {'items': [...]}}
-                # Older versions might return a flat list
-                assets = []
-                if isinstance(results, list):
-                    assets = results
-                elif isinstance(results, dict):
-                    if 'assets' in results and 'items' in results['assets']:
-                        assets = results['assets']['items']
-                    elif 'items' in results:
-                        assets = results['items']
-                    elif 'assets' in results and isinstance(results['assets'], list):
-                        assets = results['assets']
-
+                assets = self._parse_assets_from_response(results)
+                
                 if not assets:
                     break
                 
@@ -193,27 +153,69 @@ class ImmichClient:
                 break
         print(f"Loaded {len(self._asset_path_map)} assets into path map.")
 
+    def _fetch_assets_page(self, page: int, page_size: int):
+        """Fetch a single page of assets from Immich, handles falling back to old endpoints."""
+        try:
+            # Try POST /api/search/metadata
+            response = requests.post(
+                f"{self.url}/api/search/metadata",
+                headers=self.headers,
+                json={"page": page, "size": page_size, "withExif": False}
+            )
+            
+            if response.status_code in (404, 405):
+                # Try GET /api/assets
+                response = requests.get(
+                    f"{self.url}/api/assets",
+                    headers=self.headers,
+                    params={"skip": (page - 1) * page_size, "take": page_size}
+                )
+                if response.status_code == 404:
+                    # Try GET /api/asset
+                    response = requests.get(
+                        f"{self.url}/api/asset",
+                        headers=self.headers,
+                        params={"skip": (page - 1) * page_size, "take": page_size}
+                    )
+            return response
+        except Exception:
+            return None
+
+    def _parse_assets_from_response(self, results) -> list:
+        """Parse asset list from various response formats."""
+        if isinstance(results, list):
+            return results
+        if isinstance(results, dict):
+            if 'assets' in results and 'items' in results['assets']:
+                return results['assets']['items']
+            if 'items' in results:
+                return results['items']
+            if 'assets' in results and isinstance(results['assets'], list):
+                return results['assets']
+        return []
+
     def reverse_path_mapping(self, immich_path: str) -> Optional[str]:
-        """
-        Convert Immich server path to local file path.
-        """
-        # Immich paths are always forward slashes
-        for local_prefix, server_prefix in self.path_mappings.items():
-            if immich_path.startswith(server_prefix):
-                # Remove server prefix
-                relative_path = immich_path[len(server_prefix):]
+        """Convert Immich server path to local file path."""
+        # Immich paths always use forward slashes
+        for local_prefix, remote_prefix in self.path_mappings.items():
+            remote_prefix_forward = remote_prefix.replace('\\', '/')
+            if immich_path.startswith(remote_prefix_forward):
+                # Remove server prefix and leading slash
+                relative_path = immich_path[len(remote_prefix_forward):].lstrip('/')
 
-                # Remove leading slash if present
-                if relative_path.startswith('/'):
-                    relative_path = relative_path[1:]
+                # Choose local separator: use \ if local_prefix looks like Windows
+                is_windows = os.name == 'nt' or ':' in local_prefix or local_prefix.startswith('\\\\')
+                sep = '\\' if is_windows else '/'
+                
+                # Replace forward slashes with chosen separator
+                relative_path = relative_path.replace('/', sep)
 
-                # Replace forward slashes with OS-appropriate separators
-                relative_path = relative_path.replace('/', os.sep)
+                # Combine using chosen separator
+                if local_prefix.endswith(sep):
+                    local_path = local_prefix + relative_path
+                else:
+                    local_path = local_prefix + sep + relative_path
 
-                # Join with local prefix using os.path.join for correct separator handling
-                local_path = os.path.join(local_prefix, relative_path)
-
-                # Normalize path separators for local OS
                 return os.path.normpath(local_path)
         return None
 
@@ -222,35 +224,10 @@ class ImmichClient:
         Create a tag if it doesn't exist, return its ID.
         """
         try:
-            # First, list tags to see if it exists
-            page = 1
-            while True:
-                response = requests.get(
-                    f"{self.url}/api/tags",
-                    headers=self.headers,
-                    params={"page": page, "size": self.PAGE_SIZE}
-                )
-                
-                if response.status_code != 200:
-                    break
-                    
-                tags = response.json()
-                # Handle potential different response formats (list vs dict with items)
-                if isinstance(tags, dict) and 'items' in tags:
-                    tags = tags['items']
-                
-                if not tags:
-                    break
-                    
-                for tag in tags:
-                    if tag['name'] == tag_name:
-                        return tag['id']
-                
-                # If we got fewer items than limit, we're done
-                if len(tags) < self.PAGE_SIZE:
-                    break
-                    
-                page += 1
+            # Check if exists
+            tag_id = self._find_tag_by_name(tag_name)
+            if tag_id:
+                return tag_id
 
             # Create it
             response = requests.post(
@@ -261,8 +238,6 @@ class ImmichClient:
             if response.status_code in (200, 201):
                 return response.json()['id']
             elif response.status_code == 409:
-                # Conflict - likely tag was created between our check and create call
-                # Re-check tags to get the ID
                 return self.create_tag_if_not_exists(tag_name)
             else:
                 print(f"Failed to create tag {tag_name}: {response.status_code} - {response.text}")
@@ -270,6 +245,34 @@ class ImmichClient:
         except Exception as e:
             print(f"Error creating tag {tag_name}: {e}")
 
+        return None
+
+    def _find_tag_by_name(self, tag_name: str) -> Optional[str]:
+        """List tags and find one by name."""
+        page = 1
+        while True:
+            response = requests.get(
+                f"{self.url}/api/tags",
+                headers=self.headers,
+                params={"page": page, "size": self.PAGE_SIZE}
+            )
+            
+            if response.status_code != 200:
+                break
+                
+            tags_data = response.json()
+            tags = tags_data['items'] if isinstance(tags_data, dict) and 'items' in tags_data else tags_data
+            
+            if not tags:
+                break
+                
+            for tag in tags:
+                if tag['name'] == tag_name:
+                    return tag['id']
+            
+            if len(tags) < self.PAGE_SIZE:
+                break
+            page += 1
         return None
 
     def add_tag_to_asset(self, asset_id: str, tag_id: str) -> bool:
@@ -325,7 +328,7 @@ class ImmichClient:
                 print(f"Error adding tag to assets: HTTP {response.status_code}")
                 try:
                     print(f"Server response: {response.text}")
-                except:
+                except Exception:
                     pass
                 return False
                 

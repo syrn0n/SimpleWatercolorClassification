@@ -12,6 +12,7 @@ import logging
 # Configure logging
 logger = logging.getLogger(__name__)
 
+
 class DedupProcessor:
     """
     Processor for handling duplicate detection and removal operations.
@@ -67,46 +68,8 @@ class DedupProcessor:
             if len(assets_in_group) < 2:
                 continue
 
-            external: List[Dict] = []
-            picture_library_assets: List[Dict] = []
-            internal: List[Dict] = []
-            
-            for asset in assets_in_group:
-                path = asset.get('originalPath', '')
-                
-                if self.picture_library_path and path.startswith(self.picture_library_path):
-                    picture_library_assets.append(asset)
-                elif path.startswith(self.internal_path):
-                    internal.append(asset)
-                else:
-                    external.append(asset)
-
-            winner = None
-            group_to_del: List[Dict] = []
-
-            # Priority Logic:
-            # 1. Picture Library
-            if picture_library_assets:
-                winner = max(picture_library_assets, key=self._get_file_size)
-                # Keep winner, delete others in picture library + all internal + all external
-                group_to_del.extend([a for a in picture_library_assets if a['id'] != winner['id']])
-                group_to_del.extend(internal)
-                group_to_del.extend(external)
-            
-            # 2. Internal
-            elif internal:
-                winner = max(internal, key=self._get_file_size)
-                # Keep winner, delete others in internal + all external
-                group_to_del.extend([a for a in internal if a['id'] != winner['id']])
-                group_to_del.extend(external)
-                
-            # 3. External
-            elif external:
-                winner = max(external, key=self._get_file_size)
-                # Keep winner, delete others in external
-                group_to_del.extend([a for a in external if a['id'] != winner['id']])
-
-            if winner:
+            group_to_del = self._analyze_group(assets_in_group)
+            if group_to_del:
                 to_del_ids.extend([a['id'] for a in group_to_del])
 
         if not dry_run and to_del_ids:
@@ -128,3 +91,40 @@ class DedupProcessor:
                 print("No duplicate assets identified for deletion.")
 
         return len(to_del_ids)
+
+    def _analyze_group(self, assets_in_group: List[Dict]) -> List[Dict]:
+        """Analyze a duplicate group and determine which assets to delete based on priority."""
+        external: List[Dict] = []
+        picture_library_assets: List[Dict] = []
+        internal: List[Dict] = []
+        
+        for asset in assets_in_group:
+            path = asset.get('originalPath', '')
+            if self.picture_library_path and path.startswith(self.picture_library_path):
+                picture_library_assets.append(asset)
+            elif path.startswith(self.internal_path):
+                internal.append(asset)
+            else:
+                external.append(asset)
+
+        group_to_del: List[Dict] = []
+
+        # 1. Picture Library
+        if picture_library_assets:
+            winner = max(picture_library_assets, key=self._get_file_size)
+            group_to_del.extend([a for a in picture_library_assets if a['id'] != winner['id']])
+            group_to_del.extend(internal)
+            group_to_del.extend(external)
+        
+        # 2. Internal
+        elif internal:
+            winner = max(internal, key=self._get_file_size)
+            group_to_del.extend([a for a in internal if a['id'] != winner['id']])
+            group_to_del.extend(external)
+            
+        # 3. External
+        elif external:
+            winner = max(external, key=self._get_file_size)
+            group_to_del.extend([a for a in external if a['id'] != winner['id']])
+
+        return group_to_del

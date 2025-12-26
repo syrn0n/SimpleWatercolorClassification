@@ -2,6 +2,7 @@ import unittest
 import os
 from src.immich_client import ImmichClient
 
+
 class TestPathTranslation(unittest.TestCase):
     def test_translate_path_with_mapping(self):
         mappings = {
@@ -42,6 +43,7 @@ class TestPathTranslation(unittest.TestCase):
         
         expected = os.path.normpath("C:\\Photos\\2025\\photo.jpg")
         self.assertEqual(local_path, expected)
+
 
 if __name__ == '__main__':
     unittest.main()

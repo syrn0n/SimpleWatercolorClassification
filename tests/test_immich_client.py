@@ -231,7 +231,7 @@ class TestGetAssetsByTag:
         response1.json.return_value = {'assets': {'items': page1_items}}
         
         # Page 2 response (partial page, end of list)
-        page2_items = [{'id': f'asset-{ImmichClient.PAGE_SIZE+1}', 'originalPath': f'/path{ImmichClient.PAGE_SIZE+1}'}]
+        page2_items = [{'id': f'asset-{ImmichClient.PAGE_SIZE + 1}', 'originalPath': f'/path{ImmichClient.PAGE_SIZE + 1}'}]
         response2 = Mock()
         response2.status_code = 200
         response2.json.return_value = {'assets': {'items': page2_items}}
@@ -242,7 +242,7 @@ class TestGetAssetsByTag:
         
         assert len(result) == ImmichClient.PAGE_SIZE + 1
         assert result[0]['id'] == 'asset-0'
-        assert result[-1]['id'] == f'asset-{ImmichClient.PAGE_SIZE+1}'
+        assert result[-1]['id'] == f'asset-{ImmichClient.PAGE_SIZE + 1}'
         
         assert mock_post.call_count == 2
         # Check calls

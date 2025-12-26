@@ -3,6 +3,7 @@ from unittest.mock import MagicMock
 from src.dedup_processor import DedupProcessor
 from src.immich_client import ImmichClient
 
+
 class TestDedupProcessor(unittest.TestCase):
     def setUp(self):
         self.mock_client = MagicMock(spec=ImmichClient)
@@ -53,6 +54,7 @@ class TestDedupProcessor(unittest.TestCase):
         self.mock_client.get_duplicate_assets.return_value = []
         to_del_count = self.processor.execute(dry_run=True)
         self.assertEqual(to_del_count, 0)
+
 
 if __name__ == '__main__':
     unittest.main()

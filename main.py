@@ -310,7 +310,7 @@ def handle_process_new_operation(args, vals):
     print("=" * 60)
 
     # Step 1: Deduplication
-    print(f"\n[Step 1/4] Analyzing duplicates in Immich")
+    print("\n[Step 1/4] Analyzing duplicates in Immich")
     print("-" * 60)
     handle_dedup_operation(args, vals)
     
