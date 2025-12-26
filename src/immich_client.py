@@ -143,7 +143,6 @@ class ImmichClient:
                 
                 # If POST /api/search/metadata fails with 404 or 405, fall back to old endpoints
                 if response.status_code in (404, 405):
-                    endpoint = "/api/assets" if page == 1 else endpoint # placeholder logic
                     # Try GET /api/assets as fallback
                     response = requests.get(
                         f"{self.url}/api/assets",
